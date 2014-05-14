@@ -9,7 +9,9 @@ import scala.collection._
 
 TODO:
 
-- layered interpreters
++ 1 meta-layer (low-level interprets high-level)
+
+- n meta-layers (low-level interprets high-level, interprets high-level, ...)
 
 - proper profiling
 
@@ -18,6 +20,8 @@ TODO:
 
 */
 
+
+/* ---------- PART 1: low-level execution ---------- */
 
 trait Syntax {
 
@@ -48,6 +52,7 @@ trait Syntax {
       s"Const(${x.toString.take(10)})"
     }
   }
+  case class Rec(x: List[(String,Exp)]) extends Exp // TODO: express as alloc + puts
   case class Plus(x: Exp, y: Exp) extends Exp
   case class Minus(x: Exp, y: Exp) extends Exp
   case class Times(x: Exp, y: Exp) extends Exp
@@ -68,6 +73,7 @@ trait Print extends Syntax {
     case Get(a,b) => s"${pretty(a)}[${pretty(b)}]"
     case Equal(a,b) => s"${pretty(a)} == ${pretty(b)}"
     case ITE(c,a,b) => s"if (${pretty(c)}) ${pretty(a)} else ${pretty(b)}"
+    case Rec(xs) => s"Rec(${xs.map(p=>p._1 + "->"+pretty(p._2)).mkString(",")})"
     case Plus(a,b) => s"${pretty(a)} + ${pretty(b)}"
     case Minus(a,b) => s"${pretty(a)} + ${pretty(b)}"
     case Times(a,b) => s"${pretty(a)} * ${pretty(b)}"
@@ -90,21 +96,17 @@ trait Print extends Syntax {
 }
 
 
-
-
-trait Eval extends Syntax {
+trait Eval extends Syntax with Print {
 
   type Label = String
   type Obj = mutable.Map[Any,Any]
 
-  val prog = mutable.Map[Label,Block](
-    "a" -> Block(Print(Const("hello"))::Nil, Done)
-  )
+  val prog = mutable.Map[Label,Block]()
 
   var trace: Vector[String] = Vector.empty
   val mem: Obj = mutable.Map()
 
-  def ev(e: Exp): Any = e match {
+  def ev(e: Exp): Any = try { e match {
     case Mem => mem
     case Const(c) => c
     case Get(a,b) => (eval[Obj](a))(ev(b))
@@ -113,13 +115,26 @@ trait Eval extends Syntax {
     case Plus(a,b) => eval[Int](a) + eval[Int](b)
     case Minus(a,b) => eval[Int](a) - eval[Int](b)
     case Times(a,b) => eval[Int](a) * eval[Int](b)
+    case Rec(as) => mutable.Map() ++= as.map(p=> (p._1,ev(p._2)))
+  }} catch {
+    case ex =>
+      println(s"error in ev(${pretty(e)}): $ex")
+      e match {
+        case Get(a,b) => println(eval[Obj](a))
+        case _ => 
+      }
+      throw ex
   }
 
   def eval[T](e: Exp): T = ev(e).asInstanceOf[T]
 
-  def exec(name: Label): Unit = {
+  def exec(name: Label): Unit = try {
     trace = trace :+ name
     exec(prog(name))
+  } catch {
+    case ex =>
+      println(s"error in ex(${pretty(prog(name))}): $ex")
+      throw ex    
   }
   def exec(block: Block): Unit = { block.stms.foreach(exec); exec(block.cont) }
   def exec(jump: Jump): Unit = jump match {
@@ -168,6 +183,9 @@ trait LowLevel extends Syntax with Eval with Print
 
 
 
+
+/* ---------- PART 2: high-level embedded language ---------- */
+
 trait Lang {
   type Rep[+T]
 
@@ -204,7 +222,16 @@ trait Lang {
   def __ifThenElse[T](c: Boolean, a: => T, b: => T): T = c match { case true => a case false => b }
   def __ifThenElse[T](c: Rep[Boolean], a: => Rep[T], b: => Rep[T]): Rep[T]
 
+  def str_equ(x:Rep[String],y:Rep[String]):Rep[Boolean]
+
+  type Term
+
+  def record(xs: (String,Rep[Any])*): Rep[Term]
+  def field(x: Rep[Term], k: String): Rep[Term]
+
 }
+
+// direct execution
 
 trait LangDirect extends Lang {
   type Val[+T] = Rep[T]
@@ -228,7 +255,17 @@ trait LangDirect extends Lang {
   def int_plus(x:Rep[Int],y:Rep[Int]):Rep[Int] = Rep(x.x + y.x)
   def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int] = Rep(x.x - y.x)
   def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int] = Rep(x.x * y.x)
+
+  def str_equ(x:Rep[String],y:Rep[String]):Rep[Boolean] = Rep(x.x == y.x)
+
+  type Term = Map[String,Rep[Any]]
+
+  def record(xs: (String,Rep[Any])*): Rep[Term] = Rep(Map() ++ xs)
+  def field(x: Rep[Term], k: String): Rep[Term] = x.x(k).asInstanceOf[Rep[Term]]
+
 }
+
+// translation to low-level target
 
 trait LangLowLevel extends Lang with LowLevel {
 
@@ -290,8 +327,19 @@ trait LangLowLevel extends Lang with LowLevel {
     Fun(name, f)
   }
 
-  def fun2[A,B,C](name: String)(f: (Val[A],Val[B])=>Val[C]): Fun2[A,B,C] = ???
-  def fun2_apply[A,B,C](f:Fun2[A,B,C],x:Val[A],x2:Val[B]) = ???
+  type Fun2[A,B,C] = Fun[Term,C]
+
+  def fun2[A,B,C](name: String)(f: (Val[A],Val[B])=>Val[C]): Fun2[A,B,C] = {
+    fun(name) { x: Rep[Term] => 
+      f(field(x,"1").asInstanceOf[Rep[A]],
+        field(x,"2").asInstanceOf[Rep[B]])
+    }
+  }
+
+
+  def fun2_apply[A,B,C](f:Fun2[A,B,C],x:Val[A],x2:Val[B]) = {
+    fun_apply(f,Rec(List("1" -> x, "2" -> x2)))
+  }
 
 
   def __ifThenElse[A](c: Val[Boolean], a: => Val[A], b: => Val[A]): Val[A] = {
@@ -335,26 +383,36 @@ trait LangLowLevel extends Lang with LowLevel {
   def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int] = Minus(x,y)
   def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int] = Times(x,y)
 
-  def fac: Fun[Int,Int] = fun("fac") { n: Val[Int] =>
-    if (n === 0) {
-      1
-    } else {
-      n * fac(n - 1)
-    }
+  def str_equ(x:Rep[String],y:Rep[String]):Rep[Boolean] = Equal(x,y)
+
+  def record(xs: (String,Rep[Any])*): Rep[Term] = {
+    //val hd = Get(Mem,"hd")
+    //val hp = Get(Mem,"hp")
+    //stms = stms :+ Put(Mem, "hd",Plus(sd,1))
+    Rec(xs.toList)
   }
 
-  prog.clear
+  def field(x: Rep[Term], k: String): Rep[Term] = Get(x,k)
+}
 
-  val res = fac(Get(Mem,Const("in")))
-  stms = stms :+ Print(res)
-  prog(label) = Block(stms, Done)
+
+trait RunLowLevel extends LangLowLevel with ProgFac {
 
   def run() = {
+    prog.clear
+
+    val res = fac(Get(Mem,Const("in")))
+    stms = stms :+ Print(res)
+    prog(label) = Block(stms, Done)
+
     trace = Vector.empty
     mem.clear
-    mem("in") = 6
+    mem("in") = 4
     mem("sd") = 0
     mem("sp") = mutable.Map(0 -> mutable.Map())
+
+    //mem("hd") = 0
+    //mem("hp") = mutable.Map()
 
     //println(prog)
 
@@ -366,6 +424,27 @@ trait LangLowLevel extends Lang with LowLevel {
 
     //mem foreach println
   }
+
+}
+
+
+trait ProgFac extends Lang {
+
+  def fac: Fun[Int,Int] = fun("fac") { n: Rep[Int] =>
+    if (n === 0) {
+      1
+    } else {
+      n * fac(n - 1)
+    }
+  }
+
+}
+
+
+
+/* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
+
+trait Extra extends RunLowLevel {
 
   def splitWhere[T](xs0: Seq[T])(f: T => Boolean): List[Seq[T]] = { 
     val buf = new scala.collection.mutable.ListBuffer[Seq[T]]
@@ -535,28 +614,10 @@ trait LangLowLevel extends Lang with LowLevel {
 
 
 
+/* ---------- PART 4: high-level term interpreter ---------- */
 
+trait ProgEval extends Lang {
 
-trait ProgFac extends Lang {
-
-  def fac: Fun[Int,Int] = fun("fac") { n: Rep[Int] =>
-    if (n === 0) {
-      1
-    } else {
-      n * fac(n - 1)
-    }
-  }
-
-}
-
-
-trait ProgEval extends LangDirect {
-
-  def record(xs: (String,Rep[Any])*): Term1 = Rep(Map() ++ xs).asInstanceOf[Term1]
-  def field(x: Term1, k: String): Term1 = x.x.asInstanceOf[Map[String,Term1]](k)
-
-
-  trait Term
   type Term1 = Rep[Term]
 
 
@@ -569,31 +630,38 @@ trait ProgEval extends LangDirect {
   def car(x: Term1): Term1 = field(x,"car")
   def cdr(x: Term1): Term1 = field(x,"cdr")
 
-  def ife(c: Term1, a: =>Term1, b: => Term1): Term1 = if (field(c,"val") != lift(0)) a else b
-  def plus(x: Term1, y: Term1): Term1 = num(field(x,"val").asInstanceOf[Rep[Int]] + field(y,"val").asInstanceOf[Rep[Int]])
-  def minus(x: Term1, y: Term1): Term1 = num(field(x,"val").asInstanceOf[Rep[Int]] - field(y,"val").asInstanceOf[Rep[Int]])
-  def times(x: Term1, y: Term1): Term1 = num(field(x,"val").asInstanceOf[Rep[Int]] * field(y,"val").asInstanceOf[Rep[Int]])
-  def equ(x: Term1, y: Term1): Term1 = if (x.x == y.x) num(1) else num(0)
+  def toInt(x: Term1): Rep[Int] = field(x,"val").asInstanceOf[Rep[Int]]
+  def toStr(x: Term1): Rep[String] = x/*field(x,"val")*/.asInstanceOf[Rep[String]]
 
-  def isNumber(x: Term1): Term1 = if (field(x,"tag") == lift("num")) num(1) else num(0)
-  def isSymbol(x: Term1): Term1 = if (field(x,"tag") == lift("sym")) num(1) else num(0)
+  def tagOf(x: Term1): Rep[String] = field(x,"tag").asInstanceOf[Rep[String]]
+
+  def ife(c: Term1, a: =>Term1, b: => Term1): Term1 = if (int_equ(toInt(c),lift(0))) b else a
+  def plus(x: Term1, y: Term1): Term1 = num(toInt(x) + toInt(y))
+  def minus(x: Term1, y: Term1): Term1 = num(toInt(x) - toInt(y))
+  def times(x: Term1, y: Term1): Term1 = num(toInt(x) * toInt(y))
+  def equs(x: Term1, y: Term1): Term1 = if (str_equ(tagOf(x),tagOf(y))) { if (str_equ(toStr(x),toStr(y))) num(1) else num(0) } else num(0)
+  def equi(x: Term1, y: Term1): Term1 = if (int_equ(toInt(x),toInt(y))) num(1) else num(0)
+
+  def isNumber(x: Term1): Term1 = if (str_equ(tagOf(x), lift("num"))) num(1) else num(0)
+  def isSymbol(x: Term1): Term1 = if (str_equ(tagOf(x), lift("sym"))) num(1) else num(0)
 
 
   def lookup: Fun2[Term,Term,Term] = fun2("lookup") { (x,env) =>
-    ife(equ(x, car(car(env))), cdr(car(env)),
+    ife(equs(x, car(car(env))), cdr(car(env)),
         lookup(x,cdr(env)))
   }
 
   def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) => 
     ife(isNumber(e),                  e, 
     ife(isSymbol(e),                  lookup(e,env),
-    ife(equ(sym("lambda"), car(e)),   cons(e,env),
-    ife(equ(sym("ife"), car(e)),      ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
-    ife(equ(sym("equ"), car(e)),      equ(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equ(sym("plus"), car(e)),     plus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equ(sym("minus"), car(e)),    minus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equ(sym("times"), car(e)),    times(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-                                      apply(eval(car(e),env), eval(car(cdr(e)),env)))))))))) // eval only one arg?
+    ife(equs(sym("lambda"), car(e)),  cons(e,env),
+    ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
+    ife(equs(sym("equs"), car(e)),    equs(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
+    ife(equs(sym("equi"), car(e)),    equi(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
+    ife(equs(sym("plus"), car(e)),    plus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
+    ife(equs(sym("minus"), car(e)),   minus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
+    ife(equs(sym("times"), car(e)),   times(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
+                                      apply(eval(car(e),env), eval(car(cdr(e)),env))))))))))) // eval only one arg?
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
@@ -604,21 +672,26 @@ trait ProgEval extends LangDirect {
 
   def list(xs: Term1*): Term1 = if (xs.isEmpty) nil else cons(xs.head, list(xs.tail:_*))
   
-  /*val id = list("lambda", "f", "x", "x")
-  val term1 = list(id, 7)
 
-  println(eval(id,nil))
-  println(eval(term1,nil))*/
+  def prog1 = {
+    val id = list("lambda", "f", "x", "x")
+    val term1 = list(id, 7)
+    term1
+  }
 
-  val fac = list("lambda", "fac", "n",
-    list("ife", list("equ",0,"n"), 
-      num(1),
-      list("times","n",list("fac",list("minus","n",1)))))
+  def progFac = {
+    val id = list("lambda", "f", "x", "x")
+    val term1 = list(id, 7)
 
-  println(eval(list(fac,4),Rep(null)))
+    val fac = list("lambda", "fac", "n",
+      list("ife", list("equi",0,"n"), 
+        num(1),
+        list("times","n",list("fac",list("minus","n",1)))))
 
+    fac
+  }
 
-  // TODO #1: run in low-level interpreter
+  // DONE #1: run in low-level interpreter
   //   - 1 level of interpretation
   //
   // TODO #2: meta-interpreter
@@ -626,92 +699,101 @@ trait ProgEval extends LangDirect {
 }
 
 
+trait RunHighLevel extends ProgEval with LangLowLevel {
+
+  def runProg(code: =>Term1) = {
+
+    //println(eval(id,nil))
+
+    prog.clear
+    label = "main"
+
+    val ev = eval
+
+    stms = stms :+ Put(Mem,Const("in"),code) // need to eval arg first
+
+    val res = ev(Get(Mem,Const("in")),nil)
+    stms = stms :+ Print(res)
+    prog(label) = Block(stms, Done)
+
+    trace = Vector.empty
+    mem.clear
+
+    //mem("in") = prog1
+    mem("sd") = 0
+    mem("sp") = mutable.Map(0 -> mutable.Map())
+
+    //mem("hd") = 0
+    //mem("hp") = mutable.Map()
+
+    //println(prog)
+
+    exec("main")
+
+  }
+
+}
 
 
+/* ---------- PART 5: tests ---------- */
 
 object Test extends LowLevel {
 
+  /* execute fac(4) directly */
   def test1a = {
     new LangDirect with ProgFac {
       println(fac(4))
     }
   }
 
-
-  def test1b = {
-    new ProgEval {
-      
-    }
-  }
-
-
-  def test2: Unit = {
-
-    new LangLowLevel {
+  /* translate fac(4) to low-level code, interpret */
+  def test1b: Unit = {
+    new LangLowLevel with RunLowLevel {
       run
     }
-
-
   }
+
+  /* execute fac(4) in high-level interpreter, which is executed directly */
+  def test2a = {
+    new ProgEval with LangDirect {
+      println(eval(prog1,nil))
+      println(eval(list(progFac,4),nil))
+    }
+  }
+
+  /* execute fac(4) in high-level interpreter, which is mapped to low-level code, which is interpreted */
+  def test2b = {
+    new ProgEval with LangLowLevel with RunHighLevel {
+      runProg(prog1)
+    }
+    new ProgEval with LangLowLevel with RunHighLevel {
+      runProg(list(progFac,num(4)))
+    }
+  }
+
 
 
   def main(args: Array[String]): Unit = {
 
+    prog += ("a" -> Block(Print(Const("hello"))::Nil, Done))
     exec("a")
 
     test1a
     test1b
-    //test2
-  }
-
+    test2a
+    test2b
+  
 /*
+output:
 
-fac-ife-fac = {
-  Put(Mem,Const(sd),Minus(Get(Mem,Const(sd)),Const(1)))
-  Put(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(fac-ife-fa),Get(Get(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1))),Const(res)))
-  Put(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1)),Const(null))
-  Put(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(fac-if),Times(Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(arg)),Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(fac-ife-fa))))
-  Guard(Const(fac-if),fac-if,{
-    Put(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(res),Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(fac-if)))
-    Goto(Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(ret)))
-  })
-}
-fac-if = {
-  Put(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(res),Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(fac-if)))
-  Goto(Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(ret)))
-}
-main-fac = {
-  Put(Mem,Const(sd),Minus(Get(Mem,Const(sd)),Const(1)))
-  Put(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(main-fac),Get(Get(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1))),Const(res)))
-  Put(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1)),Const(null))
-  Print(Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(main-fac)))
-  Done
-}
-main = {
-  New(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1)))
-  Put(Get(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1))),Const(arg),Get(Mem,Const(in)))
-  Put(Get(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1))),Const(ret),Const(main-fac))
-  Put(Mem,Const(sd),Plus(Get(Mem,Const(sd)),Const(1)))
-  Goto(Const(fac))
-}
-fac = {
-  IfElse(Equal(Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(arg)),Const(0)),Goto(Const(fac-ift)),Goto(Const(fac-ife)))
-}
-fac-ift = {
-  Put(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(fac-if),Const(1))
-  Goto(Const(fac-if))
-}
-fac-ife = {
-  New(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1)))
-  Put(Get(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1))),Const(arg),Minus(Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(arg)),Const(1)))
-  Put(Get(Get(Mem,Const(sp)),Plus(Get(Mem,Const(sd)),Const(1))),Const(ret),Const(fac-ife-fa))
-  Put(Mem,Const(sd),Plus(Get(Mem,Const(sd)),Const(1)))
-  Guard(Const(fac),fac,{
-    IfElse(Equal(Get(Get(Get(Mem,Const(sp)),Get(Mem,Const(sd))),Const(arg)),Const(0)),Goto(Const(fac-ift)),Goto(Const(fac-ife)))
-  })
-}
-
+hello
+Rep(24)
+24
+Rep(Map(tag -> Rep(num), val -> Rep(7)))
+Rep(Map(tag -> Rep(num), val -> Rep(24)))
+Map(val -> 7, tag -> num)
+Map(val -> 24, tag -> num)
 */
-
+  }
 
 }
