@@ -462,7 +462,8 @@ trait Extra extends RunLowLevel {
     }
     throw new Exception
   }
-  println(splitWhere(List(1,2,3,4,5,6,7,8,9))(_ % 4 == 0))
+  assert(splitWhere(List(1,2,3,4,5,6,7,8,9))(_ % 4 == 0) == 
+    List(List(1, 2, 3, 4), List(5, 6, 7, 8), List(9)))
 
 
   def runImprove() = {
@@ -503,12 +504,19 @@ trait Extra extends RunLowLevel {
           ... AB AC AD AB AB AC AD AB ...
               ^        ^  ^        ^
 
-        {{{  caveat  }}}
+        <caveat>
 
-        now it would be tempting to fuse AB and call it a day.
-        this won't work, because each AC or AD call would bail out !!!!!
+          now it would be tempting to fuse AB and call it a day.
+          this won't work, because we'd be replacing A and thus
+          each AC or AD call would bail out after 
+          the A part of AB!!!!!
 
-        we need to consider larger pieces in one go
+          we need to consider larger pieces in one go.
+
+        </caveat>
+
+        we repeat the process to get coarser granularity
+
 
       ----------------------------------------------
 
@@ -521,7 +529,7 @@ trait Extra extends RunLowLevel {
 
         BA is very specific and also hot --> merge!
 
-        return path profiling
+        (also: return path profiling for `foreach { x => ... }`
 
     */
 
@@ -548,11 +556,11 @@ trait Extra extends RunLowLevel {
     println
   }
 
+/*  runImprove()
   runImprove()
   runImprove()
   runImprove()
-  runImprove()
-  runImprove()
+  runImprove() */
 
   prog.foreach(println)
 
@@ -702,7 +710,6 @@ trait ProgEval extends Lang {
 trait RunHighLevel extends ProgEval with LangLowLevel {
 
   def runProg(code: =>Term1) = {
-
     //println(eval(id,nil))
 
     prog.clear
@@ -737,37 +744,124 @@ trait RunHighLevel extends ProgEval with LangLowLevel {
 
 /* ---------- PART 5: tests ---------- */
 
-object Test extends LowLevel {
+trait TestBase extends LowLevel {
+
+  val analyze: Boolean
 
   /* execute fac(4) directly */
   def test1a = {
+    println("/* execute fac(4) directly */")
     new LangDirect with ProgFac {
       println(fac(4))
     }
+    println
   }
 
   /* translate fac(4) to low-level code, interpret */
   def test1b: Unit = {
-    new LangLowLevel with RunLowLevel {
+    println("/* translate fac(4) to low-level code, interpret */")
+    new LangLowLevel with RunLowLevel with Extra {
       run
+
+      def report = {
+        //println(prog)
+        trace.foreach(println)
+
+        println("hotspots:")
+        val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
+        hotspots.take(10).foreach(println)
+        println()
+      }
+      if (analyze) report
     }
+    println
   }
 
   /* execute fac(4) in high-level interpreter, which is executed directly */
   def test2a = {
+    println("/* execute fac(4) in high-level interpreter, which is executed directly */")
     new ProgEval with LangDirect {
-      println(eval(prog1,nil))
+      //println(eval(prog1,nil))
       println(eval(list(progFac,4),nil))
     }
+    println
   }
 
   /* execute fac(4) in high-level interpreter, which is mapped to low-level code, which is interpreted */
   def test2b = {
-    new ProgEval with LangLowLevel with RunHighLevel {
+    println("/* execute fac(4) in high-level interpreter, which is mapped to low-level code, which is interpreted */")
+    /*new ProgEval with LangLowLevel with RunHighLevel {
       runProg(prog1)
-    }
-    new ProgEval with LangLowLevel with RunHighLevel {
+    }*/
+    new ProgEval with LangLowLevel with RunHighLevel with Extra {
       runProg(list(progFac,num(4)))
+      //println(prog)
+      //trace.foreach(println)
+
+      def report = {
+        val traceB = this.trace
+
+        implicit class MySeqOps[T](xs: Seq[T]) {
+          def collectBy[K,V](f1: T => K, f2: Seq[T] => V): Map[K,V] =
+            xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
+        }
+
+        // map blocks in trace to numeric indexes
+
+        println("block <-> index:")
+        val indexToBlock = traceB.distinct.toArray
+        val blockToIndex = indexToBlock.zipWithIndex.toMap
+        println(blockToIndex)
+
+        val trace = traceB map blockToIndex
+
+        // compute frequencies, sort to find hotspots
+
+        val freq = trace.collectBy(x=>x, _.length)
+
+        println("hotspots:")
+        val hotspots = freq.toSeq.sortBy(-_._2)
+        hotspots.take(10).foreach(println)
+
+        val hottest = hotspots.head
+
+        println("hottest")
+        println(hottest)
+        println(indexToBlock(hottest._1) + " -> " + hottest._2)
+
+        println()
+
+        // compute hot edges
+
+        val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
+
+        println("hot edges:")
+        val hotedges = edgefreq.toSeq.sortBy(-_._2)
+        hotedges.take(10).foreach(println)
+        println()
+
+        val hottestEdge = hotedges.head
+
+        println("hottest")
+        println(hottestEdge)
+        //println(indexToBlock(hottest._1) + " -> " + hottest._2)
+
+        println()
+
+        // compute pred/succ sets, specificity
+
+        val pred = (trace zip trace.drop(1)) collectBy(_._2, _.map(_._1).distinct);
+        val succ = (trace zip trace.drop(1)) collectBy(_._1, _.map(_._2).distinct);
+
+        for ((h,_) <- hotspots.take(10)) {
+          println(pred(h) + " --> " + h + " --> " + succ(h))
+        }
+
+
+
+      }
+      if (analyze) report
+
     }
   }
 
@@ -775,8 +869,8 @@ object Test extends LowLevel {
 
   def main(args: Array[String]): Unit = {
 
-    prog += ("a" -> Block(Print(Const("hello"))::Nil, Done))
-    exec("a")
+    //prog += ("a" -> Block(Print(Const("hello"))::Nil, Done))
+    //exec("a")
 
     test1a
     test1b
@@ -795,5 +889,14 @@ Map(val -> 7, tag -> num)
 Map(val -> 24, tag -> num)
 */
   }
-
 }
+
+
+object TestNoAnalyze extends TestBase {
+  val analyze = false
+}
+
+object TestAnalyze extends TestBase {
+  val analyze = true
+}
+
