@@ -444,7 +444,7 @@ trait ProgFac extends Lang {
 
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
 
-trait Extra extends RunLowLevel {
+trait AnalyzeOld extends RunLowLevel {
 
   def splitWhere[T](xs0: Seq[T])(f: T => Boolean): List[Seq[T]] = { 
     val buf = new scala.collection.mutable.ListBuffer[Seq[T]]
@@ -621,6 +621,142 @@ trait Extra extends RunLowLevel {
 }
 
 
+trait Analyze extends RunLowLevel {
+
+  def report = {
+    val traceB = this.trace
+
+    implicit class MySeqOps[T](xs: Seq[T]) {
+      def collectBy[K,V](f1: T => K, f2: Seq[T] => V): Map[K,V] =
+        xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
+    }
+
+    // map blocks in trace to numeric indexes
+
+    println("block <-> index:")
+    val indexToBlock = traceB.distinct.toArray
+    val blockToIndex = indexToBlock.zipWithIndex.toMap
+    println(blockToIndex)
+
+    var trace = traceB map blockToIndex
+
+    import scala.sys.process._
+
+    def merge(xs: List[Int]) = {
+      val List(a,b) = xs
+      val str0 = trace.mkString(";",";;",";")
+      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;")
+      println(str0)
+      println(str1)
+      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      println(trace)
+    }
+
+    // export graph viz
+    def printGraph(s:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int]) = {
+      val out = new PrintStream(new File(s"graphs/g$s.dot"))
+
+      out.println("digraph G {")
+      //out.println("rankdir=LR")
+
+      for ((a,f) <- freq) {
+        out.println(s"""L$a [label=\"L$a: $f\" weight="$f" penwidth="${0.5 * f}" shape=box]""")
+      }
+
+      for (((a,b),f) <- edgefreq) {
+        out.println(s"""L$a -> L$b [label=\"$f\" weight="$f" penwidth="${0.5 * f}"]""")
+      }
+      
+      out.println("}")
+      out.close()
+
+      s"dot -Tpdf -O graphs/g$s.dot".!
+    }
+
+    def analyze(step: Int): Unit = {
+      if (step > 500) return println("ABORT")
+
+      println(s"/* analysis pass $step */")
+      // compute frequencies, sort to find hotspots
+
+      val freq = trace.collectBy(x=>x, _.length)
+
+      println("hotspots:")
+      val hotspots = freq.toSeq.sortBy(-_._2)
+      hotspots.take(10).foreach(println)
+
+      val hottest = hotspots.head
+
+      println("hottest")
+      println(hottest)
+      println(indexToBlock(hottest._1) + " -> " + hottest._2)
+
+      println()
+
+      // compute hot edges
+
+      val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
+
+      println("hot edges:")
+      val hotedges = edgefreq.toSeq.sortBy(-_._2)
+      hotedges.take(10).foreach(println)
+      println()
+
+      printGraph("%03d".format(step))(freq,edgefreq)
+
+      val hottestEdge = hotedges.head
+
+      println("hottest")
+      println(hottestEdge)
+      //println(indexToBlock(hottest._1) + " -> " + hottest._2)
+
+      println()
+
+      // compute pred/succ sets, specificity
+
+      val pred = (trace zip trace.drop(1)) collectBy(_._2, _.map(_._1).distinct);
+      val succ = (trace zip trace.drop(1)) collectBy(_._1, _.map(_._2).distinct);
+
+      for ((h,_) <- hotspots.take(10)) {
+        println(pred.getOrElse(h,Vector.empty) + " --> " + h + " --> " + succ.getOrElse(h,Vector.empty))
+      }
+
+      val max = hotspots.length
+
+      for (deg   <- max to 0 by -1; // outdegree
+           (h,f) <- hotspots if pred contains h) {
+        var hit = false
+        if (succ contains h) {
+          // among the hottest hotspots, pick the one with the largest outdegree
+          if (succ(h).size == deg) {
+            // if it's a loop don't bother -- don't start peeling iterations
+            if (!(succ(h) contains h)) {
+              for (p <- pred(h) if succ(p).size == 1) {
+                println(s" -----> merge $p,$h")
+                if (p != h) {
+                  merge(List(p,h))
+                  hit = true
+                } else println("EEE")
+              }
+            }
+          }
+        }
+        if (hit) return analyze(step + 1)
+      }
+
+    }
+
+    val dir = new File("graphs")
+    dir.mkdirs
+    dir.listFiles.foreach(_.delete)
+
+    analyze(0)
+
+  }
+
+}
+
+
 
 /* ---------- PART 4: high-level term interpreter ---------- */
 
@@ -760,10 +896,10 @@ trait TestBase extends LowLevel {
   /* translate fac(4) to low-level code, interpret */
   def test1b: Unit = {
     println("/* translate fac(4) to low-level code, interpret */")
-    new LangLowLevel with RunLowLevel with Extra {
+    new LangLowLevel with RunLowLevel with Analyze {
       run
 
-      def report = {
+      override def report = {
         //println(prog)
         trace.foreach(println)
 
@@ -771,6 +907,8 @@ trait TestBase extends LowLevel {
         val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
         hotspots.take(10).foreach(println)
         println()
+
+        super.report
       }
       if (analyze) report
     }
@@ -793,130 +931,10 @@ trait TestBase extends LowLevel {
     /*new ProgEval with LangLowLevel with RunHighLevel {
       runProg(prog1)
     }*/
-    new ProgEval with LangLowLevel with RunHighLevel with Extra {
+    new ProgEval with LangLowLevel with RunHighLevel with Analyze {
       runProg(list(progFac,num(4)))
       //println(prog)
       //trace.foreach(println)
-
-      def report = {
-        val traceB = this.trace
-
-        implicit class MySeqOps[T](xs: Seq[T]) {
-          def collectBy[K,V](f1: T => K, f2: Seq[T] => V): Map[K,V] =
-            xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
-        }
-
-        // map blocks in trace to numeric indexes
-
-        println("block <-> index:")
-        val indexToBlock = traceB.distinct.toArray
-        val blockToIndex = indexToBlock.zipWithIndex.toMap
-        println(blockToIndex)
-
-        var trace = traceB map blockToIndex
-
-        import scala.sys.process._
-
-        def merge(xs: List[Int]) = {
-          val List(a,b) = xs
-          val str0 = trace.mkString(";",";",";")
-          val str1 = str0.replace(s";$a;$b;",s";$a;")
-          trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
-        }
-
-        // export graph viz
-        def printGraph(s:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int]) = {
-          val out = new PrintStream(new File(s"graphs/g$s.dot"))
-
-          out.println("digraph G {")
-          //out.println("rankdir=LR")
-
-          for ((a,f) <- freq) {
-            out.println(s"""L$a [label=\"L$a: $f\" weight="$f" penwidth="${0.5 * f}" shape=box]""")
-          }
-
-          for (((a,b),f) <- edgefreq) {
-            out.println(s"""L$a -> L$b [label=\"$f\" weight="$f" penwidth="${0.5 * f}"]""")
-          }
-          
-          out.println("}")
-          out.close()
-
-          s"dot -Tpdf -O graphs/g$s.dot".!
-        }
-
-        def analyze(step: Int): Unit = {
-          if (step > 500) return println("ABORT")
-
-          println(s"/* analysis pass $step */")
-          // compute frequencies, sort to find hotspots
-
-          val freq = trace.collectBy(x=>x, _.length)
-
-          println("hotspots:")
-          val hotspots = freq.toSeq.sortBy(-_._2)
-          hotspots.take(10).foreach(println)
-
-          val hottest = hotspots.head
-
-          println("hottest")
-          println(hottest)
-          println(indexToBlock(hottest._1) + " -> " + hottest._2)
-
-          println()
-
-          // compute hot edges
-
-          val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
-
-          println("hot edges:")
-          val hotedges = edgefreq.toSeq.sortBy(-_._2)
-          hotedges.take(10).foreach(println)
-          println()
-
-          printGraph("%03d".format(step))(freq,edgefreq)
-
-          val hottestEdge = hotedges.head
-
-          println("hottest")
-          println(hottestEdge)
-          //println(indexToBlock(hottest._1) + " -> " + hottest._2)
-
-          println()
-
-          // compute pred/succ sets, specificity
-
-          val pred = (trace zip trace.drop(1)) collectBy(_._2, _.map(_._1).distinct);
-          val succ = (trace zip trace.drop(1)) collectBy(_._1, _.map(_._2).distinct);
-
-          for ((h,_) <- hotspots.take(10)) {
-            println(pred.getOrElse(h,Vector.empty) + " --> " + h + " --> " + succ.getOrElse(h,Vector.empty))
-          }
-
-          for (i <- 0 until 100; (h,f) <- hotspots) {
-            if (pred contains h) if ((succ contains h) && succ(h).size == 100 - i) { // inefficient
-              var hit = false
-              for (p <- pred(h) if succ(p).size == 1) {
-                println(s" -----> merge $p,$h")
-                if (p != h) {
-                  merge(List(p,h))
-                  hit = true
-                } else println("EEE")
-              }
-              if (hit)
-                return analyze(step + 1)
-            }
-          }
-
-        }
-
-        val dir = new File("graphs")
-        dir.mkdirs
-        dir.listFiles.foreach(_.delete)
-
-        analyze(0)
-
-      }
 
       if (analyze) report
 
