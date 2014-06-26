@@ -57,6 +57,7 @@ trait Syntax {
   case class Minus(x: Exp, y: Exp) extends Exp
   case class Times(x: Exp, y: Exp) extends Exp
   case class Equal(x: Exp, y: Exp) extends Exp
+  case class LessThan(x: Exp, y: Exp) extends Exp
   case class ITE(c: Exp, x: Exp, y: Exp) extends Exp
   case class Get(a: Exp, b: Exp) extends Exp  // a[b]
   case object Mem extends Exp  
@@ -72,6 +73,7 @@ trait Print extends Syntax {
     case Const(c) => c.toString
     case Get(a,b) => s"${pretty(a)}[${pretty(b)}]"
     case Equal(a,b) => s"${pretty(a)} == ${pretty(b)}"
+    case LessThan(a,b) => s"${pretty(a)} <= ${pretty(b)}"
     case ITE(c,a,b) => s"if (${pretty(c)}) ${pretty(a)} else ${pretty(b)}"
     case Rec(xs) => s"Rec(${xs.map(p=>p._1 + "->"+pretty(p._2)).mkString(",")})"
     case Plus(a,b) => s"${pretty(a)} + ${pretty(b)}"
@@ -111,6 +113,7 @@ trait Eval extends Syntax with Print {
     case Const(c) => c
     case Get(a,b) => (eval[Obj](a))(ev(b))
     case Equal(a,b) => ev(a) == ev(b)
+    case LessThan(a,b) => eval[Int](a) <= eval[Int](b)
     case ITE(c,a,b) => if (eval[Boolean](c)) ev(a) else ev(b)
     case Plus(a,b) => eval[Int](a) + eval[Int](b)
     case Minus(a,b) => eval[Int](a) - eval[Int](b)
@@ -209,12 +212,18 @@ trait Lang {
 
   implicit class IntOps(x: Rep[Int]) {
     def ===(y: Rep[Int]) = int_equ(x,y)
+    def <=(y: Rep[Int]) = int_lte(x,y)
     def +(y: Rep[Int]) = int_plus(x,y)
     def -(y: Rep[Int]) = int_minus(x,y)
     def *(y: Rep[Int]) = int_times(x,y)
   }
 
+  implicit class BoolOps(x: Rep[Boolean]) {
+    def ||(y: Rep[Boolean]): Rep[Boolean] = if (x) true else y
+  }
+
   def int_equ(x:Rep[Int],y:Rep[Int]):Rep[Boolean]
+  def int_lte(x:Rep[Int],y:Rep[Int]):Rep[Boolean]
   def int_plus(x:Rep[Int],y:Rep[Int]):Rep[Int]
   def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int]
   def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int]
@@ -228,7 +237,6 @@ trait Lang {
 
   def record(xs: (String,Rep[Any])*): Rep[Term]
   def field(x: Rep[Term], k: String): Rep[Term]
-
 }
 
 // direct execution
@@ -252,6 +260,7 @@ trait LangDirect extends Lang {
   implicit def lift[T](x: T) = Rep(x)
 
   def int_equ(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = Rep(x.x == y.x)
+  def int_lte(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = Rep(x.x <= y.x)
   def int_plus(x:Rep[Int],y:Rep[Int]):Rep[Int] = Rep(x.x + y.x)
   def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int] = Rep(x.x - y.x)
   def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int] = Rep(x.x * y.x)
@@ -272,6 +281,7 @@ trait LangLowLevel extends Lang with LowLevel {
   var label = "main"
   var stms: List[Stm] = Nil
 
+  type Term = Any
   type Val[+T] = Exp
   type Rep[+T] = Exp
 
@@ -379,6 +389,7 @@ trait LangLowLevel extends Lang with LowLevel {
   implicit def lift[T](x: T) = Const(x)
 
   def int_equ(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = Equal(x,y)
+  def int_lte(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = LessThan(x,y)
   def int_plus(x:Rep[Int],y:Rep[Int]):Rep[Int] = Plus(x,y)
   def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int] = Minus(x,y)
   def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int] = Times(x,y)
@@ -396,18 +407,18 @@ trait LangLowLevel extends Lang with LowLevel {
 }
 
 
-trait RunLowLevel extends LangLowLevel with ProgFac {
+trait RunLowLevel extends LangLowLevel {
 
-  def run() = {
+  def run[A,B](f: => Fun[A,B], arg: => A) = {
     prog.clear
 
-    val res = fac(Get(Mem,Const("in")))
+    val res = f(Get(Mem,Const("in")))
     stms = stms :+ Print(res)
     prog(label) = Block(stms, Done)
 
     trace = Vector.empty
     mem.clear
-    mem("in") = 4
+    mem("in") = arg
     mem("sd") = 0
     mem("sp") = mutable.Map(0 -> mutable.Map())
 
@@ -440,7 +451,18 @@ trait ProgFac extends Lang {
 
 }
 
+trait ProgPascal extends Lang {
+  def pair(x: Rep[Any], y: Rep[Any]): Rep[Term] = record("fst"->x, "snd"->y)
+  def fst[A](t: Rep[Term]): Rep[A] = field(t, "fst").asInstanceOf[Rep[A]]
+  def snd[A](t: Rep[Term]): Rep[A] = field(t, "snd").asInstanceOf[Rep[A]]
 
+  def pascal: Fun[Term,Int] = fun("pascal") { a: Rep[Term] =>
+    val c = fst[Int](a)
+    val r = snd[Int](a)
+    if (c <= 0 || r <= c) 1
+    else pascal(pair(c - 1, r - 1)) + pascal(pair(c, r - 1))
+  }
+}
 
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
 
@@ -466,8 +488,8 @@ trait AnalyzeOld extends RunLowLevel {
     List(List(1, 2, 3, 4), List(5, 6, 7, 8), List(9)))
 
 
-  def runImprove() = {
-    run()
+  def runImprove[A,B](f: Fun[A,B], arg: A) = {
+    run(f, arg)
 
     /*
       what does an interpreter do:
@@ -785,6 +807,7 @@ trait ProgEval extends Lang {
   def times(x: Term1, y: Term1): Term1 = num(toInt(x) * toInt(y))
   def equs(x: Term1, y: Term1): Term1 = if (str_equ(tagOf(x),tagOf(y))) { if (str_equ(toStr(x),toStr(y))) num(1) else num(0) } else num(0)
   def equi(x: Term1, y: Term1): Term1 = if (int_equ(toInt(x),toInt(y))) num(1) else num(0)
+  def ltei(x: Term1, y: Term1): Term1 = if (int_lte(toInt(x),toInt(y))) num(1) else num(0)
 
   def isNumber(x: Term1): Term1 = if (str_equ(tagOf(x), lift("num"))) num(1) else num(0)
   def isSymbol(x: Term1): Term1 = if (str_equ(tagOf(x), lift("sym"))) num(1) else num(0)
@@ -802,10 +825,14 @@ trait ProgEval extends Lang {
     ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
     ife(equs(sym("equs"), car(e)),    equs(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("equi"), car(e)),    equi(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
+    ife(equs(sym("ltei"), car(e)),    ltei(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("plus"), car(e)),    plus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("minus"), car(e)),   minus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("times"), car(e)),   times(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-                                      apply(eval(car(e),env), eval(car(cdr(e)),env))))))))))) // eval only one arg?
+    ife(equs(sym("cons"), car(e)),    cons(eval(car(cdr(e)), env), eval(car(cdr(cdr(e))),env)),
+    ife(equs(sym("car"), car(e)),     car(eval(car(cdr(e)),env)),
+    ife(equs(sym("cdr"), car(e)),     cdr(eval(car(cdr(e)),env)),
+                                      apply(eval(car(e),env), eval(car(cdr(e)),env))))))))))))))) // eval only one arg?
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
@@ -816,6 +843,7 @@ trait ProgEval extends Lang {
 
   def list(xs: Term1*): Term1 = if (xs.isEmpty) nil else cons(xs.head, list(xs.tail:_*))
   
+  def or(x: Term1, y: Term1) = list("ife", x, num(1), y)
 
   def prog1 = {
     val id = list("lambda", "f", "x", "x")
@@ -833,6 +861,20 @@ trait ProgEval extends Lang {
         list("times","n",list("fac",list("minus","n",1)))))
 
     fac
+  }
+
+  def progPascal = {
+    def dec(x: Term1): Term1 = list("minus", x, num(1))
+    val pascal = list("lambda", "pascal", "a", {
+      val c = list("car", "a")
+      val r = list("cdr", "a")
+      list("ife", or(list("ltei", c, num(0)), list("ltei", r, c)),
+           num(1),
+           list("plus",
+                list("pascal", list("cons", dec(c), dec(r))),
+                list("pascal", list("cons", c, dec(r)))))
+    })
+    pascal
   }
 
   // DONE #1: run in low-level interpreter
@@ -896,8 +938,8 @@ trait TestBase extends LowLevel {
   /* translate fac(4) to low-level code, interpret */
   def test1b: Unit = {
     println("/* translate fac(4) to low-level code, interpret */")
-    new LangLowLevel with RunLowLevel with Analyze {
-      run
+    new LangLowLevel with RunLowLevel with ProgFac with Analyze {
+      run(fac,4)
 
       override def report = {
         //println(prog)
@@ -976,3 +1018,75 @@ object TestAnalyze extends TestBase {
   val analyze = true
 }
 
+trait PascalTestBase extends LowLevel {
+
+  val analyze: Boolean
+
+  def test1a = {
+    println("/* execute pascal(pair(3,6)) directly */")
+    new LangDirect with ProgPascal {
+      println(pascal(pair(3,6)))
+    }
+    println
+  }
+
+  def test1b: Unit = {
+    println("/* translate pascal(pair(3,6)) to low-level code, interpret */")
+    new LangLowLevel with RunLowLevel with Analyze with ProgPascal {
+      run(pascal, ev(pair(3,6)))
+
+      override def report = {
+        //println(prog)
+        trace.foreach(println)
+
+        println("hotspots:")
+        val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
+        hotspots.take(10).foreach(println)
+        println()
+
+        super.report
+      }
+      if (analyze) report
+    }
+    println
+  }
+
+  def test2a = {
+    println("/* execute pascal(pair(3,6)) in high-level interpreter, which is executed directly */")
+    new ProgEval with LangDirect {
+      //println(eval(prog1,nil))
+      println(eval(list(progPascal,list(sym("cons"),num(3),num(6))),nil))
+    }
+    println
+  }
+
+  def test2b = {
+    println("/* execute pascal(pair(3,6)) in high-level interpreter, which is mapped to low-level code, which is interpreted */")
+    /*new ProgEval with LangLowLevel with RunHighLevel {
+      runProg(prog1)
+    }*/
+    new ProgEval with LangLowLevel with RunHighLevel with Analyze {
+      runProg(list(progPascal,list(sym("cons"), num(3),num(6))))
+      //println(prog)
+      //trace.foreach(println)
+
+      if (analyze) report
+
+    }
+  }
+
+  def main(args: Array[String]): Unit = {
+    test1a
+    test1b
+    test2a
+    test2b
+  }
+}
+
+object PascalTestNoAnalyze extends PascalTestBase {
+  val analyze = false
+}
+
+object PascalTestAnalyze extends PascalTestBase {
+  val analyze = true
+}
