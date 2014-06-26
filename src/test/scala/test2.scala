@@ -668,7 +668,7 @@ trait AnalyzeOld extends RunLowLevel {
 
 trait Analyze extends RunLowLevel {
 
-  def report = {
+  def report(s1:String) = {
     val traceB = this.trace
 
     implicit class MySeqOps[T](xs: Seq[T]) {
@@ -685,8 +685,6 @@ trait Analyze extends RunLowLevel {
 
     var trace = traceB map blockToIndex
 
-    import scala.sys.process._
-
     def merge(xs: List[Int]) = {
       val List(a,b) = xs
       val str0 = trace.mkString(";",";;",";")
@@ -698,8 +696,15 @@ trait Analyze extends RunLowLevel {
     }
 
     // export graph viz
-    def printGraph(s:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int]) = {
-      val out = new PrintStream(new File(s"graphs/g$s.dot"))
+
+    val dir = new File(s"graphs-$s1")
+    dir.mkdirs
+    dir.listFiles.foreach(_.delete)
+    val combinedPdf = new File(s"graphs-all-$s1.pdf")
+    if (combinedPdf.exists) combinedPdf.delete
+
+    def printGraph(s2:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int]) = {
+      val out = new PrintStream(new File(dir,s"g$s2.dot"))
 
       out.println("digraph G {")
       //out.println("rankdir=LR")
@@ -715,7 +720,9 @@ trait Analyze extends RunLowLevel {
       out.println("}")
       out.close()
 
-      s"dot -Tpdf -O graphs/g$s.dot".!
+      import scala.sys.process._
+
+      s"dot -Tpdf -O $dir/g$s2.dot".!
     }
 
     def analyze(step: Int): Unit = {
@@ -791,11 +798,13 @@ trait Analyze extends RunLowLevel {
 
     }
 
-    val dir = new File("graphs")
-    dir.mkdirs
-    dir.listFiles.foreach(_.delete)
-
-    analyze(0)
+    try {
+      analyze(0)
+    } finally {
+      // join all pdfs: TODO
+      //import scala.sys.process._
+      //(s"pdfjoin -q -o $combinedPdf " + dir.listFiles.filter(_.getName.endsWith(".pdf")).mkString(" ")).!!
+    }
 
   }
 
@@ -984,7 +993,7 @@ trait TestBase extends LowLevel {
     new LangLowLevel with RunLowLevel with ProgFac with Analyze {
       run(fac,4)
 
-      override def report = {
+      override def report(name: String) = {
         //println(prog)
         trace.foreach(println)
 
@@ -993,9 +1002,9 @@ trait TestBase extends LowLevel {
         hotspots.take(10).foreach(println)
         println()
 
-        super.report
+        super.report(name)
       }
-      if (analyze) report
+      if (analyze) report("fac1b")
     }
     println
   }
@@ -1021,7 +1030,7 @@ trait TestBase extends LowLevel {
       //println(prog)
       //trace.foreach(println)
 
-      if (analyze) report
+      if (analyze) report("fac2b")
 
     }
   }
@@ -1078,7 +1087,7 @@ trait PascalTestBase extends LowLevel {
     new LangLowLevel with RunLowLevel with Analyze with ProgPascal {
       run(pascal, ev(pair(3,6)))
 
-      override def report = {
+      override def report(name: String) = {
         //println(prog)
         trace.foreach(println)
 
@@ -1087,9 +1096,9 @@ trait PascalTestBase extends LowLevel {
         hotspots.take(10).foreach(println)
         println()
 
-        super.report
+        super.report(name)
       }
-      if (analyze) report
+      if (analyze) report("pascal-1b")
     }
     println
   }
@@ -1113,7 +1122,7 @@ trait PascalTestBase extends LowLevel {
       //println(prog)
       //trace.foreach(println)
 
-      if (analyze) report
+      if (analyze) report("pascal-2b")
 
     }
   }
@@ -1151,7 +1160,7 @@ trait NestedTestBase extends LowLevel {
     new LangLowLevel with RunLowLevel with ProgNested with Analyze {
       run(nested,4)
 
-      override def report = {
+      override def report(name: String) = {
         //println(prog)
         trace.foreach(println)
 
@@ -1160,9 +1169,9 @@ trait NestedTestBase extends LowLevel {
         hotspots.take(10).foreach(println)
         println()
 
-        super.report
+        super.report(name)
       }
-      if (analyze) report
+      if (analyze) report("nested-1b")
     }
     println
   }
@@ -1186,7 +1195,7 @@ trait NestedTestBase extends LowLevel {
       //println(prog)
       //trace.foreach(println)
 
-      if (analyze) report
+      if (analyze) report("nested-2b")
 
     }
   }
@@ -1225,7 +1234,7 @@ trait FibTestBase extends LowLevel {
     new LangLowLevel with RunLowLevel with ProgFib with Analyze {
       run(fib,4)
 
-      override def report = {
+      override def report(name: String) = {
         //println(prog)
         trace.foreach(println)
 
@@ -1234,9 +1243,9 @@ trait FibTestBase extends LowLevel {
         hotspots.take(10).foreach(println)
         println()
 
-        super.report
+        super.report(name)
       }
-      if (analyze) report
+      if (analyze) report("fib-1b")
     }
     println
   }
@@ -1260,7 +1269,7 @@ trait FibTestBase extends LowLevel {
       //println(prog)
       //trace.foreach(println)
 
-      if (analyze) report
+      if (analyze) report("fib-2b")
 
     }
   }
@@ -1269,7 +1278,7 @@ trait FibTestBase extends LowLevel {
     test1a
     test1b
     test2a
-    //test2b
+    test2b
   }
 }
 
