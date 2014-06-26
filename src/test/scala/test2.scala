@@ -131,6 +131,11 @@ trait Eval extends Syntax with Print {
 
   def eval[T](e: Exp): T = ev(e).asInstanceOf[T]
 
+  abstract class Trampoline
+  case object TrampoDone extends Trampoline
+  case class TrampoLabel(l: Label) extends Trampoline
+  case class TrampoBlock(b: Block) extends Trampoline
+
   def exec(name: Label): Unit = try {
     trace = trace :+ name
     exec(prog(name))
@@ -139,16 +144,27 @@ trait Eval extends Syntax with Print {
       println(s"error in ex(${pretty(prog(name))}): $ex")
       throw ex    
   }
-  def exec(block: Block): Unit = { block.stms.foreach(exec); exec(block.cont) }
-  def exec(jump: Jump): Unit = jump match {
-    case Done => 
+  @scala.annotation.tailrec 
+  final def exec(block: Block): Unit = { 
+    block.stms.foreach(exec); 
+    resolve(block.cont) match {
+      case TrampoDone =>
+      case TrampoLabel(name) =>
+        trace = trace :+ name
+        exec(prog(name))
+      case TrampoBlock(block) =>
+        exec(block)
+    }
+  }
+  def resolve(jump: Jump): Trampoline = jump match {
+    case Done => TrampoDone
     case Goto(l) => 
-      exec(eval[Label](l))
-    case IfElse(c,a,b) => if (eval[Boolean](c)) exec(a) else exec(b)
+      TrampoLabel(eval[Label](l))
+    case IfElse(c,a,b) => if (eval[Boolean](c)) resolve(a) else resolve(b)
     case Guard(l,x,b) => 
       val x1 = eval[Label](l)
-      if (x1 == x) exec(b)
-      else exec(x1)
+      if (x1 == x) TrampoBlock(b)
+      else TrampoLabel(x1)
   }
   def exec(stm: Stm): Unit = { /*println(stm);*/ stm } match {
     case Print(a) => println(eval[Any](a))
@@ -766,12 +782,17 @@ trait Analyze extends RunLowLevel {
 
     var trace = traceB map blockToIndex
 
+    // merge nodes
+
+    val mergeHist = ((0 until indexToBlock.length) map (i => Vector(i))).toArray
+
     def merge(xs: List[Int]) = {
       val List(a,b) = xs
+      mergeHist(a) = mergeHist(a) ++ mergeHist(b)
       val str0 = trace.mkString(";",";;",";")
       val str1 = str0.replaceAll(s";$a;;$b;",s";$a;")
-      println(str0)
-      println(str1)
+      //println(str0)
+      //println(str1)
       trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
       println(trace)
     }
@@ -790,12 +811,27 @@ trait Analyze extends RunLowLevel {
       out.println("digraph G {")
       //out.println("rankdir=LR")
 
+      /*out.println("""struct1 [shape=plaintext label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"><TR><TD>""")
+
+      out.println("foo1<BR/>")
+      out.println("foo2<BR/>")
+      out.println("foo3<BR/>")
+
+      out.println("""</TD></TR></TABLE>>];""")*/
+
+      val fmax = freq.values.max
+      val pmax = 15
+      def scale(f: Double) = if (fmax <= pmax) f else f/fmax * pmax
+
       for ((a,f) <- freq) {
-        out.println(s"""L$a [label=\"L$a: $f\" weight="$f" penwidth="${0.5 * f}" shape=box]""")
+        val fw = scale(f)
+        val size = mergeHist(a).length
+        out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" penwidth="${fw}" shape=box]""")
       }
 
       for (((a,b),f) <- edgefreq) {
-        out.println(s"""L$a -> L$b [label=\"$f\" weight="$f" penwidth="${0.5 * f}"]""")
+        val fw = scale(f)
+        out.println(s"""L$a -> L$b [label=\"$f\" weight="$f" penwidth="${fw}"]""")
       }
       
       out.println("}")
@@ -805,6 +841,8 @@ trait Analyze extends RunLowLevel {
 
       s"dot -Tpdf -O $dir/g$s2.dot".!
     }
+
+    // perform one step of analysis/transformation
 
     def analyze(step: Int): Unit = {
       if (step > 500) return println("ABORT")
@@ -881,6 +919,11 @@ trait Analyze extends RunLowLevel {
 
     try {
       analyze(0)
+
+      println()
+      println("merge history:")
+      mergeHist.filter(_.length > 1).foreach(println)
+
     } finally {
       // join all pdfs
       import scala.sys.process._
@@ -1349,7 +1392,7 @@ trait FibTestBase extends LowLevel {
   def test1b: Unit = {
     println("/* translate fib(4) to low-level code, interpret */")
     new LangLowLevel with RunLowLevel with ProgFib with Analyze {
-      run(fib,4)
+      run(fib,12)
 
       override def report(name: String) = {
         //println(prog)
@@ -1382,7 +1425,7 @@ trait FibTestBase extends LowLevel {
       runProg(prog1)
     }*/
     new ProgEval with LangLowLevel with RunHighLevel with Analyze {
-      runProg(list(progFib,num(4)))
+      runProg(list(progFib,num(12)))
       //println(prog)
       //trace.foreach(println)
 
