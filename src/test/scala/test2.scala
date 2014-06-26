@@ -475,6 +475,18 @@ trait ProgNested extends Lang {
   }
 }
 
+trait ProgFib extends Lang {
+
+  def fib: Fun[Int,Int] = fun("fac") { n: Rep[Int] =>
+    if (n <= 1) {
+      n
+    } else {
+      fib(n-1)+fib(n-2)
+    }
+  }
+
+}
+
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
 
 trait AnalyzeOld extends RunLowLevel {
@@ -900,6 +912,14 @@ trait ProgEval extends Lang {
     nested
   }
 
+  def progFib = {
+    val fib = list("lambda", "fib", "n",
+      list("ife", list("ltei","n",1),
+        "n",
+        list("plus",list("fib",list("minus","n",1)),list("fib",list("minus","n",2)))))
+    fib
+  }
+
   // DONE #1: run in low-level interpreter
   //   - 1 level of interpretation
   //
@@ -1185,5 +1205,79 @@ object NestedTestNoAnalyze extends NestedTestBase {
 }
 
 object NestedTestAnalyze extends NestedTestBase {
+  val analyze = true
+}
+
+trait FibTestBase extends LowLevel {
+
+  val analyze: Boolean
+
+  def test1a = {
+    println("/* execute fib(4) directly */")
+    new LangDirect with ProgFib {
+      println(fib(4))
+    }
+    println
+  }
+
+  def test1b: Unit = {
+    println("/* translate fib(4) to low-level code, interpret */")
+    new LangLowLevel with RunLowLevel with ProgFib with Analyze {
+      run(fib,4)
+
+      override def report = {
+        //println(prog)
+        trace.foreach(println)
+
+        println("hotspots:")
+        val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
+        hotspots.take(10).foreach(println)
+        println()
+
+        super.report
+      }
+      if (analyze) report
+    }
+    println
+  }
+
+  def test2a = {
+    println("/* execute fib(4) in high-level interpreter, which is executed directly */")
+    new ProgEval with LangDirect {
+      //println(eval(prog1,nil))
+      println(eval(list(progFib,4),nil))
+    }
+    println
+  }
+
+  def test2b = {
+    println("/* execute fib(4) in high-level interpreter, which is mapped to low-level code, which is interpreted */")
+    /*new ProgEval with LangLowLevel with RunHighLevel {
+      runProg(prog1)
+    }*/
+    new ProgEval with LangLowLevel with RunHighLevel with Analyze {
+      runProg(list(progFib,num(4)))
+      //println(prog)
+      //trace.foreach(println)
+
+      if (analyze) report
+
+    }
+  }
+
+  def main(args: Array[String]): Unit = {
+    test1a
+    test1b
+    test2a
+    //test2b
+  }
+}
+
+
+object FibTestNoAnalyze extends FibTestBase {
+  val analyze = false
+}
+
+object FibTestAnalyze extends FibTestBase {
   val analyze = true
 }
