@@ -464,6 +464,17 @@ trait ProgPascal extends Lang {
   }
 }
 
+trait ProgNested extends Lang {
+  def nested: Fun[Int,Int] = fun("nested") { n: Rep[Int] =>
+    def inner: Fun[Int,Int] = fun("inner") { i: Rep[Int] =>
+      if (i === 0) 1
+      else i+inner(i-1)
+    }
+    if (n === 0) 1
+    else inner(n)+nested(n-1)
+  }
+}
+
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
 
 trait AnalyzeOld extends RunLowLevel {
@@ -877,6 +888,18 @@ trait ProgEval extends Lang {
     pascal
   }
 
+  def progNested = {
+    val nested = list("lambda", "nested", "n", {
+      val inner = list("lambda", "inner", "i",
+                       list("ife", list("equi", 0, "i"),
+                            num(1),
+                            list("plus", "i", list("inner", list("minus", "i", 1)))))
+      list("ife", list("equi", 0, "n"),
+           num(1),
+           list("plus", list(inner, "n"), list("nested", list("minus", "n", 1))))})
+    nested
+  }
+
   // DONE #1: run in low-level interpreter
   //   - 1 level of interpretation
   //
@@ -1088,5 +1111,79 @@ object PascalTestNoAnalyze extends PascalTestBase {
 }
 
 object PascalTestAnalyze extends PascalTestBase {
+  val analyze = true
+}
+
+trait NestedTestBase extends LowLevel {
+
+  val analyze: Boolean
+
+  def test1a = {
+    println("/* execute nested(4) directly */")
+    new LangDirect with ProgNested {
+      println(nested(4))
+    }
+    println
+  }
+
+  def test1b: Unit = {
+    println("/* translate nested(4) to low-level code, interpret */")
+    new LangLowLevel with RunLowLevel with ProgNested with Analyze {
+      run(nested,4)
+
+      override def report = {
+        //println(prog)
+        trace.foreach(println)
+
+        println("hotspots:")
+        val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
+        hotspots.take(10).foreach(println)
+        println()
+
+        super.report
+      }
+      if (analyze) report
+    }
+    println
+  }
+
+  def test2a = {
+    println("/* execute nested(4) in high-level interpreter, which is executed directly */")
+    new ProgEval with LangDirect {
+      //println(eval(prog1,nil))
+      println(eval(list(progNested,4),nil))
+    }
+    println
+  }
+
+  def test2b = {
+    println("/* execute nested(4) in high-level interpreter, which is mapped to low-level code, which is interpreted */")
+    /*new ProgEval with LangLowLevel with RunHighLevel {
+      runProg(prog1)
+    }*/
+    new ProgEval with LangLowLevel with RunHighLevel with Analyze {
+      runProg(list(progNested,num(4)))
+      //println(prog)
+      //trace.foreach(println)
+
+      if (analyze) report
+
+    }
+  }
+
+  def main(args: Array[String]): Unit = {
+    test1a
+    test1b
+    test2a
+    test2b
+  }
+}
+
+
+object NestedTestNoAnalyze extends NestedTestBase {
+  val analyze = false
+}
+
+object NestedTestAnalyze extends NestedTestBase {
   val analyze = true
 }
