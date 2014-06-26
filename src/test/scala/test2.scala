@@ -131,6 +131,11 @@ trait Eval extends Syntax with Print {
 
   def eval[T](e: Exp): T = ev(e).asInstanceOf[T]
 
+  abstract class Trampoline
+  case object TrampoDone extends Trampoline
+  case class TrampoLabel(l: Label) extends Trampoline
+  case class TrampoBlock(b: Block) extends Trampoline
+
   def exec(name: Label): Unit = try {
     trace = trace :+ name
     exec(prog(name))
@@ -139,16 +144,27 @@ trait Eval extends Syntax with Print {
       println(s"error in ex(${pretty(prog(name))}): $ex")
       throw ex    
   }
-  def exec(block: Block): Unit = { block.stms.foreach(exec); exec(block.cont) }
-  def exec(jump: Jump): Unit = jump match {
-    case Done => 
+  @scala.annotation.tailrec 
+  final def exec(block: Block): Unit = { 
+    block.stms.foreach(exec); 
+    resolve(block.cont) match {
+      case TrampoDone =>
+      case TrampoLabel(name) =>
+        trace = trace :+ name
+        exec(prog(name))
+      case TrampoBlock(block) =>
+        exec(block)
+    }
+  }
+  def resolve(jump: Jump): Trampoline = jump match {
+    case Done => TrampoDone
     case Goto(l) => 
-      exec(eval[Label](l))
-    case IfElse(c,a,b) => if (eval[Boolean](c)) exec(a) else exec(b)
+      TrampoLabel(eval[Label](l))
+    case IfElse(c,a,b) => if (eval[Boolean](c)) resolve(a) else resolve(b)
     case Guard(l,x,b) => 
       val x1 = eval[Label](l)
-      if (x1 == x) exec(b)
-      else exec(x1)
+      if (x1 == x) TrampoBlock(b)
+      else TrampoLabel(x1)
   }
   def exec(stm: Stm): Unit = { /*println(stm);*/ stm } match {
     case Print(a) => println(eval[Any](a))
@@ -1293,7 +1309,7 @@ trait FibTestBase extends LowLevel {
       runProg(prog1)
     }*/
     new ProgEval with LangLowLevel with RunHighLevel with Analyze {
-      runProg(list(progFib,num(6)))
+      runProg(list(progFib,num(12)))
       //println(prog)
       //trace.foreach(println)
 
