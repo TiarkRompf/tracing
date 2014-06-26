@@ -195,6 +195,16 @@ trait Lang {
   type Fun[A,B]
   type Fun2[A,B,C]
 
+  type Arr[A]
+  def newArr[A](name: String): Arr[A]
+  def getArr[A](name: String): Arr[A]
+  implicit class ArrayOps[A](a: Arr[A]) {
+    def apply(i:Rep[Int]):Rep[A] = arr_apply(a, i)
+    def update(i:Rep[Int],v:Rep[A]):Arr[A] = arr_update(a, i, v)
+  }
+  def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A]
+  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A]
+
   implicit class FunOps[A,B](f:Fun[A,B]) {
     def apply(x:Rep[A]):Rep[B] = fun_apply(f,x)
   }
@@ -246,6 +256,17 @@ trait LangDirect extends Lang {
 
   case class Rep[+T](x:T)
 
+  var arrays = mutable.Map[String,Arr[_]]()
+  type Arr[A] = Rep[mutable.Map[Int,A]]
+  def newArr[A](name: String): Arr[A] = {
+    val a:Arr[A] = Rep(mutable.Map())
+    arrays(name) = a
+    a
+  }
+  def getArr[A](name: String): Arr[A] = arrays(name).asInstanceOf[Arr[A]]
+  def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = a.x(i.x)
+  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = {a.x(i.x) = v.x; a}
+
   case class Fun[A,B](f: Rep[A]=>Rep[B])
   case class Fun2[A,B,C](f: (Rep[A],Rep[B])=>Rep[C])
 
@@ -284,6 +305,22 @@ trait LangLowLevel extends Lang with LowLevel {
   type Term = Any
   type Val[+T] = Exp
   type Rep[+T] = Exp
+
+  type Arr[A] = Exp
+  def newArr[A](name: String) = {
+    stms = stms :+ New(Mem, name)
+    Get(Mem, name)
+  }
+  def getArr[A](name: String) = {
+    Get(Mem, name)
+  }
+  def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = {
+    Get(a, i)
+  }
+  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = {
+    stms = stms :+ Put(a, i, v)
+    a
+  }
 
   implicit def lift(x: Int): Exp = Const(x)
   implicit def lifts(x: String): Exp = Const(x)
@@ -485,6 +522,50 @@ trait ProgFib extends Lang {
     }
   }
 
+}
+
+trait ProgSieve extends Lang {
+  val id_n = 0
+  val id_i = 1
+  def init: Fun[Int,Unit] = fun("init") {i: Rep[Int] =>
+    val primes = getArr[Int]("primes")
+    val n = primes(id_n)
+    primes(i) = 1
+    if (i === n) {
+    } else {
+      init(i+1)
+    }
+  }
+  def mark: Fun[Int,Unit] = fun("mark") {k: Rep[Int] =>
+    val primes = getArr[Int]("primes")
+    val n = primes(id_n)
+    val i = primes(id_i)
+    if ((n+1) <= k) {
+    } else {
+      primes(k) = 0
+      mark(k+i)
+    }
+  }
+  def algo: Fun[Int,Unit] = fun("algo") {i: Rep[Int] =>
+    val primes = getArr[Int]("primes")
+    val n = primes(id_n)
+    primes(id_i) = i
+    if (primes(i) === 0) {
+    } else {
+      mark(i+i)
+    }
+    if (i === n) {
+    } else {
+      algo(i+1)
+    }
+  }
+  def sieve: Fun[Int,Int] = fun("sieve") { n: Rep[Int] =>
+    val primes = newArr[Int]("primes")
+    primes(id_n) = n
+    init(2)
+    algo(2)
+    primes(n)
+  }
 }
 
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
@@ -819,7 +900,7 @@ trait ProgEval extends Lang {
 
   type Term1 = Rep[Term]
 
-
+  def arr[A](x: Arr[A]): Term1 = record("tag"->lift("arr"),"val"->x.asInstanceOf[Rep[Any]])
   implicit def num(x: Rep[Int]): Term1 = record("tag"->lift("num"),"val"->x)
   implicit def num(x: Int): Term1 = num(lift(x))
   implicit def sym(s: String): Term1 = record("tag"->lift("sym"),"val"->lift(s))
@@ -829,6 +910,7 @@ trait ProgEval extends Lang {
   def car(x: Term1): Term1 = field(x,"car")
   def cdr(x: Term1): Term1 = field(x,"cdr")
 
+  def toArr[A](x: Term1): Arr[A] = field(x,"val").asInstanceOf[Arr[A]]
   def toInt(x: Term1): Rep[Int] = field(x,"val").asInstanceOf[Rep[Int]]
   def toStr(x: Term1): Rep[String] = x/*field(x,"val")*/.asInstanceOf[Rep[String]]
 
@@ -851,6 +933,11 @@ trait ProgEval extends Lang {
         lookup(x,cdr(env)))
   }
 
+  def my_arr_new: Term1 = arr(newArr[Term]("my_only_array"))
+  def my_arr: Term1 = arr(getArr[Term]("my_only_array"))
+  def arr_get(a: Term1, i: Term1): Term1 = arr_apply(toArr(a), toInt(i))
+  def arr_put(a: Term1, i: Term1, v: Term1): Term1 = arr(arr_update(toArr(a), toInt(i), v))
+
   def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) => 
     ife(isNumber(e),                  e, 
     ife(isSymbol(e),                  lookup(e,env),
@@ -865,7 +952,14 @@ trait ProgEval extends Lang {
     ife(equs(sym("cons"), car(e)),    cons(eval(car(cdr(e)), env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("car"), car(e)),     car(eval(car(cdr(e)),env)),
     ife(equs(sym("cdr"), car(e)),     cdr(eval(car(cdr(e)),env)),
-                                      apply(eval(car(e),env), eval(car(cdr(e)),env))))))))))))))) // eval only one arg?
+    ife(equs(sym("my_arr_new"), car(e)), my_arr_new,
+    ife(equs(sym("my_arr"), car(e)),     my_arr,
+    ife(equs(sym("arr_get"), car(e)),    arr_get(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env)),
+    ife(equs(sym("arr_put"), car(e)),    arr_put(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env), eval(car(cdr(cdr(cdr(e)))), env)),
+    {
+                                         apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
+    }
+    )))))))))))))))))
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
@@ -877,6 +971,11 @@ trait ProgEval extends Lang {
   def list(xs: Term1*): Term1 = if (xs.isEmpty) nil else cons(xs.head, list(xs.tail:_*))
   
   def or(x: Term1, y: Term1) = list("ife", x, num(1), y)
+  def dec(x: Term1): Term1 = list("minus", x, num(1))
+  def inc(x: Term1): Term1 = list("plus", x, num(1))
+  def begin(x: Term1, xs: Term1*): Term1 =
+    if (xs.isEmpty) x
+    else list(list("lambda", "_", "_", begin(xs.head, xs.tail:_*)), x)
 
   def prog1 = {
     val id = list("lambda", "f", "x", "x")
@@ -897,7 +996,6 @@ trait ProgEval extends Lang {
   }
 
   def progPascal = {
-    def dec(x: Term1): Term1 = list("minus", x, num(1))
     val pascal = list("lambda", "pascal", "a", {
       val c = list("car", "a")
       val r = list("cdr", "a")
@@ -928,6 +1026,24 @@ trait ProgEval extends Lang {
         "n",
         list("plus",list("fib",list("minus","n",1)),list("fib",list("minus","n",2)))))
     fib
+  }
+
+  def progSieve = {
+    def unit: Term1 = 1
+    val sieve = list("lambda", "sieve", "n", begin(
+        list("my_arr_new"),
+        list(list("lambda", "init", "i", begin(
+             list("arr_put", list("my_arr"), "i", 1),
+             list("ife", list("equi", "i", "n"), unit, list("init", inc("i"))))), 2),
+        list(list("lambda", "algo", "i", begin(
+             list("ife", list("equi", list("arr_get", list("my_arr"), "i"), 0), unit, list(list("lambda", "mark", "k",
+                 list("ife", list("ltei", inc("n"), "k"), unit, begin(
+                     list("arr_put", list("my_arr"), "k", 0),
+                     list("mark", list("plus", "k", "i"))))),
+                 list("plus", "i", "i"))),
+             list("ife", list("equi", "i", "n"), unit, list("algo", inc("i"))))), 2),
+        list("arr_get", list("my_arr"), "n")))
+    sieve
   }
 
   // DONE #1: run in low-level interpreter
@@ -1290,4 +1406,92 @@ object FibTestNoAnalyze extends FibTestBase {
 
 object FibTestAnalyze extends FibTestBase {
   val analyze = true
+}
+
+
+trait SieveTestBase extends LowLevel {
+
+  val analyze: Boolean
+  val n: Int
+
+  def test1a = {
+    println("/* execute sieve("+n+") directly */")
+    new LangDirect with ProgSieve {
+      println(sieve(n))
+    }
+    println
+  }
+
+  def test1b: Unit = {
+    println("/* translate sieve("+n+") to low-level code, interpret */")
+    new LangLowLevel with RunLowLevel with ProgSieve with Analyze {
+      run(sieve,n)
+
+      override def report(name: String) = {
+        //println(prog)
+        trace.foreach(println)
+
+        println("hotspots:")
+        val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
+        hotspots.take(10).foreach(println)
+        println()
+
+        super.report(name)
+      }
+      if (analyze) report("sieve-1b"+n)
+    }
+    println
+  }
+
+  def test2a = {
+    println("/* execute sieve("+n+") in high-level interpreter, which is executed directly */")
+    new ProgEval with LangDirect {
+      //println(eval(prog1,nil))
+      println(eval(list(progSieve,n),nil))
+    }
+    println
+  }
+
+  def test2b = {
+    println("/* execute sieve("+n+") in high-level interpreter, which is mapped to low-level code, which is interpreted */")
+    /*new ProgEval with LangLowLevel with RunHighLevel {
+      runProg(prog1)
+    }*/
+    new ProgEval with LangLowLevel with RunHighLevel with Analyze {
+      runProg(list(progSieve,num(n)))
+      //println(prog)
+      //trace.foreach(println)
+
+      if (analyze) report("sieve-2b"+n)
+
+    }
+  }
+
+  def main(args: Array[String]): Unit = {
+    test1a
+    test1b
+    test2a
+    test2b
+  }
+}
+
+
+object SieveNoTestNoAnalyze extends SieveTestBase {
+  val analyze = false
+  val n = 4
+}
+
+object SieveNoTestAnalyze extends SieveTestBase {
+  val analyze = true
+  val n = 4
+}
+
+object SieveYesTestNoAnalyze extends SieveTestBase {
+  val analyze = false
+  val n = 7
+}
+
+object SieveYesTestAnalyze extends SieveTestBase {
+  val analyze = true
+  val n = 7
 }
