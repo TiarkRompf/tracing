@@ -1000,6 +1000,7 @@ trait ProgEval extends Lang {
     ife(equs(sym("arr_get"), car(e)),    arr_get(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env)),
     ife(equs(sym("arr_put"), car(e)),    arr_put(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env), eval(car(cdr(cdr(cdr(e)))), env)),
     {
+      // println("EXP:"+e)
                                          apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
     }
     )))))))))))))))))
@@ -1019,6 +1020,8 @@ trait ProgEval extends Lang {
   def begin(x: Term1, xs: Term1*): Term1 =
     if (xs.isEmpty) x
     else list(list("lambda", "_", "_", begin(xs.head, xs.tail:_*)), x)
+  def let(name: String, e1: Term1, e2: Term1): Term1 =
+    list(list("lambda", "_", name, e2), e1)
 
   def prog1 = {
     val id = list("lambda", "f", "x", "x")
@@ -1071,7 +1074,7 @@ trait ProgEval extends Lang {
     fib
   }
 
-  def progSieve = {
+  def progSieveClosures = {
     def unit: Term1 = 1
     val sieve = list("lambda", "sieve", "n", begin(
         list("my_arr_new"),
@@ -1086,6 +1089,32 @@ trait ProgEval extends Lang {
                  list("plus", "i", "i"))),
              list("ife", list("equi", "i", "n"), unit, list("algo", inc("i"))))), 2),
         list("arr_get", list("my_arr"), "n")))
+    sieve
+  }
+
+  def progSieve = {
+    def unit: Term1 = 1
+    val id_i: Term1 = 1
+    val init = list("lambda", "init", "i", begin(
+        list("arr_put", list("my_arr"), "i", 1),
+        list("ife", list("equi", "i", "n"), unit, list("init", inc("i")))))
+    val mark = list("lambda", "mark", "k",
+        list("ife", list("ltei", inc("n"), "k"), unit, begin(
+          list("arr_put", list("my_arr"), "k", 0),
+          list("mark", list("plus", "k", list("arr_get", list("my_arr"), id_i))))))
+    val algo = list("lambda", "algo", "i", begin(
+        list("arr_put", list("my_arr"), id_i, "i"),
+        list("ife", list("equi", list("arr_get", list("my_arr"), "i"), 0), unit, list("mark", list("plus", "i", "i"))),
+        list("ife", list("equi", "i", "n"), unit, list("algo", inc("i")))))
+    val sieve = list("lambda", "sieve", "n",
+        let("init", init,
+        let("mark", mark,
+        let("algo", algo,
+        begin(
+        list("my_arr_new"),
+        list("init", 2),
+        list("algo", 2),
+        list("arr_get", list("my_arr"), "n"))))))
     sieve
   }
 
