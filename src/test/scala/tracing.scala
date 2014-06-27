@@ -168,6 +168,7 @@ trait Eval extends Syntax with Print {
   }
   var out: Any = null
   def output(a: Any): Unit = {
+    //println("OUT:"+a)
     out = a
   }
 
@@ -773,7 +774,7 @@ trait ProgEval extends LangX {
 
 
 trait RunHighLevel extends ProgEval with LangLowLevel {
-  def runProg(code: =>Term1) = {
+  def runProg(code: =>Term1, env: =>Term1) = {
     //println(eval(id,nil))
 
     prog.clear
@@ -781,9 +782,9 @@ trait RunHighLevel extends ProgEval with LangLowLevel {
 
     val ev = eval
 
-    stms = stms :+ Put(Mem,Const("in"),code) // need to eval arg first
+    stms = stms :+ Put(Mem,Const("in"),code) :+ Put(Mem,Const("env"),env)
 
-    val res = ev(Get(Mem,Const("in")),nil)
+    val res = ev(Get(Mem,Const("in")),Get(Mem,Const("env")))
     stms = stms :+ Output(res)
     prog(label) = Block(stms, Done)
 
@@ -900,13 +901,22 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
   }
 
   test(id+": execute in high-level interpreter, which is executed directly") {
-    val c = new LangDirect {}
     val d = new Code2Data {}
     val p = program(d)
     val fn = p.f
     val i = new ProgEval with LangDirect
     import i._
     assert(eval(list(fn, data(p.a)), global_env(d.order, d.funs)) === data(p.b))
+  }
+
+  test(id+": execute in high-level interpreter, which is mapped to low-level code, which is interpreted") {
+    val d = new Code2Data {}
+    val p = program(d)
+    val fn = p.f
+    val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze
+    import i._
+    runProg(list(sym(fn), data(p.a)), global_env(d.order, d.funs))
+    assert(out === ev(data(p.b)))
   }
 }
 

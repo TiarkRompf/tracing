@@ -1136,6 +1136,7 @@ trait RunHighLevel extends ProgEval with LangLowLevel {
 
     val ev = eval
 
+
     stms = stms :+ Put(Mem,Const("in"),code) // need to eval arg first
 
     val res = ev(Get(Mem,Const("in")),nil)
