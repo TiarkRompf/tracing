@@ -740,10 +740,17 @@ trait ProgEval extends LangX {
   //   - 2 levels of interpretation
 
   def data(x: Any): Term1 = x match {
+    case u: Unit => num(0)
+    case b: Boolean => if (b) num(1) else num(0)
     case n: Int => num(n)
     case s: String => sym(s)
     case Nil => nil
     case x::xs => cons(data(x), data(xs))
+  }
+
+  def global_env(order: List[String], funs: Map[String, Any], env: Term1 = nil): Term1 = order match {
+    case Nil => env
+    case x::xs => global_env(xs, funs, cons(cons(x, cons(data(funs(x)), env)), env))
   }
 }
 
@@ -784,10 +791,12 @@ trait RunHighLevel extends ProgEval with LangLowLevel {
 
 trait Code2Data extends Lang {
   type Rep[+T] = Any
-  type Fun[A,B] = Any
+  type Fun[A,B] = String
   type Arr[A] = Any
+  private var _order: List[String] = Nil
+  private val _funs = mutable.Map[String,Any]()
   var counter = 0
-  def fresh_var[A] = {
+  def fresh_var[A]: String = {
     counter += 1
     "x"+counter
   }
@@ -803,7 +812,15 @@ trait Code2Data extends Lang {
   override def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = List("arr_put", i, v)
   override def fun[A,B](name: String)(f: Rep[A]=>Rep[B]): Fun[A,B] = {
     val arg = fresh_var[A]
-    List("lambda", name, arg, f(arg))
+    _funs.get(name) match {
+      case None =>
+        _order = name::_order
+        _funs(name) = "TODO"
+        val r = f(arg)
+        _funs(name) = List("lambda", name, arg, r)
+      case Some(_) =>
+    }
+    name
   }
   override def fun_apply[A,B](f:Fun[A,B],x:Rep[A]):Rep[B] = List(f, x)
   implicit override def lift[T](x: T): Rep[T] = x
@@ -813,13 +830,16 @@ trait Code2Data extends Lang {
   override def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("minus", x, y)
   override def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("times", x, y)
 
-  override def __ifThenElse[T](c: Rep[Boolean], a: => Rep[T], b: => Rep[T]): Rep[T] = List("ife", a, b)
+  override def __ifThenElse[T](c: Rep[Boolean], a: => Rep[T], b: => Rep[T]): Rep[T] = List("ife", c, a, b)
 
   override def str_equ(x:Rep[String],y:Rep[String]):Rep[Boolean] = List("equs", x, y)
 
   override def pair(x: Rep[Any], y: Rep[Any]): Rep[Any] = List("cons", x, y)
   override def fst[A](t: Rep[Any]): Rep[A] = List("car", t)
   override def snd[A](t: Rep[Any]): Rep[A] = List("cdr", t)
+
+  def funs: Map[String,Any] = _funs.toMap
+  def order: List[String] = _order
 }
 
 /* ---------- PART 6: tests ---------- */
@@ -864,7 +884,10 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val c = new LangDirect {}
     val d = new Code2Data {}
     val p = program(d)
-    println(p)
+    val fn = p.f
+    val i = new ProgEval with LangDirect
+    import i._
+    assert(eval(list(fn, data(p.a)), global_env(d.order, d.funs)) === data(p.b))
   }
 }
 
