@@ -213,24 +213,30 @@ trait Lang {
   def begin[T](a: => Any, b: => Rep[T]): Rep[T] = {
     a;b
   }
+  def begin[T](a: => Any, b: => Any, c: => Rep[T]): Rep[T] = {
+    a;b;c
+  }
   def begin[T](a: => Any, b: => Any, c: => Any, d: => Rep[T]): Rep[T] = {
     a;b;c;d
   }
+  def begin[T](a: => Any, b: => Any, c: => Any, d: => Any, e: => Rep[T]): Rep[T] = {
+    a;b;c;d;e
+  }
   type Arr[A]
-  def newMyArr[A]: Arr[A]
+  def newMyArr[A]: Rep[Unit]
   def myArr[A]: Arr[A]
   implicit class ArrayOps[A](a: Arr[A]) {
-    def apply(i:Rep[Int]):Rep[A] = arr_apply(a, i)
-    def update(i:Rep[Int],v:Rep[A]):Arr[A] = arr_update(a, i, v)
+    def apply(i:Rep[Int]): Rep[A] = arr_apply(a, i)
+    def update(i:Rep[Int],v:Rep[A]): Rep[Unit] = arr_update(a, i, v)
   }
   def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A]
-  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A]
+  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Rep[Unit]
 
   implicit class FunOps[A,B](f:Fun[A,B]) {
     def apply(x:Rep[A]):Rep[B] = fun_apply(f,x)
   }
   def fun[A,B](name: String)(f: Rep[A]=>Rep[B]): Fun[A,B]
-  def fun_apply[A,B](f:Fun[A,B],x:Rep[A]):Rep[B]
+  def fun_apply[A,B](f:Fun[A,B],x:Rep[A]): Rep[B]
 
   implicit def lift[T](x: T): Rep[T]
 
@@ -246,11 +252,11 @@ trait Lang {
     def ||(y: Rep[Boolean]): Rep[Boolean] = if (x) true else y
   }
 
-  def int_equ(x:Rep[Int],y:Rep[Int]):Rep[Boolean]
-  def int_lte(x:Rep[Int],y:Rep[Int]):Rep[Boolean]
-  def int_plus(x:Rep[Int],y:Rep[Int]):Rep[Int]
-  def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int]
-  def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int]
+  def int_equ(x:Rep[Int],y:Rep[Int]): Rep[Boolean]
+  def int_lte(x:Rep[Int],y:Rep[Int]): Rep[Boolean]
+  def int_plus(x:Rep[Int],y:Rep[Int]): Rep[Int]
+  def int_minus(x:Rep[Int],y:Rep[Int]): Rep[Int]
+  def int_times(x:Rep[Int],y:Rep[Int]): Rep[Int]
 
   def __ifThenElse[T](c: Boolean, a: => T, b: => T): T = c match { case true => a case false => b }
   def __ifThenElse[T](c: Rep[Boolean], a: => Rep[T], b: => Rep[T]): Rep[T]
@@ -265,9 +271,9 @@ trait Lang {
 trait LangX extends Lang {
   type Term
 
-  def newArr[A](name: String): Arr[A]
+  def newArr[A](name: String): Rep[Unit]
   def getArr[A](name: String): Arr[A]
-  override def newMyArr[A]: Arr[A] = newArr[A]("my_only_array")
+  override def newMyArr[A]: Rep[Unit] = newArr[A]("my_only_array")
   override def myArr[A]: Arr[A] = getArr[A]("my_only_array")
 
   type Fun2[A,B,C]
@@ -294,14 +300,14 @@ trait LangDirect extends LangX {
 
   var arrays = mutable.Map[String,Arr[_]]()
   type Arr[A] = Rep[mutable.Map[Int,A]]
-  def newArr[A](name: String): Arr[A] = {
+  def newArr[A](name: String): Rep[Unit] = {
     val a:Arr[A] = Rep(mutable.Map())
     arrays(name) = a
-    a
+    ()
   }
   def getArr[A](name: String): Arr[A] = arrays(name).asInstanceOf[Arr[A]]
   def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = a.x(i.x)
-  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = {a.x(i.x) = v.x; a}
+  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Rep[Unit] = {a.x(i.x) = v.x; ()}
 
   case class Fun[A,B](f: Rep[A]=>Rep[B])
   case class Fun2[A,B,C](f: (Rep[A],Rep[B])=>Rep[C])
@@ -346,7 +352,7 @@ trait LangLowLevel extends LangX with LowLevel {
   type Arr[A] = Exp
   def newArr[A](name: String) = {
     stms = stms :+ New(Mem, name)
-    Get(Mem, name)
+    Const(0)
   }
   def getArr[A](name: String) = {
     Get(Mem, name)
@@ -354,9 +360,9 @@ trait LangLowLevel extends LangX with LowLevel {
   def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = {
     Get(a, i)
   }
-  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = {
+  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Rep[Unit] = {
     stms = stms :+ Put(a, i, v)
-    a
+    Const(0)
   }
 
   implicit def lift(x: Int): Exp = Const(x)
@@ -690,10 +696,16 @@ trait ProgEval extends LangX {
         lookup(x,cdr(env)))
   }
 
-  def my_arr_new: Term1 = arr(newMyArr[Term])
+  def my_arr_new: Term1 = {newMyArr[Term]; num(0)}
   def my_arr: Term1 = arr(myArr[Term])
-  def arr_get(a: Term1, i: Term1): Term1 = arr_apply(toArr(a), toInt(i))
-  def arr_put(a: Term1, i: Term1, v: Term1): Term1 = arr(arr_update(toArr(a), toInt(i), v))
+  def arr_get(a: Term1, i: Term1): Term1 = {
+    //println("ARR_GET:"+a)
+    arr_apply(toArr(a), toInt(i))
+  }
+  def arr_put(a: Term1, i: Term1, v: Term1): Term1 = {
+    //println("ARR_PUT:"+a+":"+i+":"+v)
+    arr_update(toArr(a), toInt(i), v); num(0)
+  }
 
   def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) =>
     ife(isNumber(e),                  e,
@@ -714,7 +726,9 @@ trait ProgEval extends LangX {
     ife(equs(sym("arr_get"), car(e)),    arr_get(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env)),
     ife(equs(sym("arr_put"), car(e)),    arr_put(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env), eval(car(cdr(cdr(cdr(e)))), env)),
     {
-      // println("EXP:"+e)
+      //println("EXP: "+e)
+      //println("CAR(e): "+car(e))
+      //println("CAR(CDR(e)): "+car(cdr((e))))
                                          apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
     }
     )))))))))))))))))
@@ -808,11 +822,13 @@ trait Code2Data extends Lang {
     case _ => List(List("lambda", "_", "_", begin_macro(xs.head, xs.tail:_*)), x)
   }
   override def begin[T](a: => Any, b: => Rep[T]): Rep[T] = begin_macro(a, b)
+  override def begin[T](a: => Any, b: => Any, c: => Rep[T]): Rep[T] = begin_macro(a, b, c)
   override def begin[T](a: => Any, b: => Any, c: => Any, d: => Rep[T]): Rep[T] = begin_macro(a, b, c, d)
-  override def newMyArr[A]: Arr[A] = List("my_arr_new")
+  override def begin[T](a: => Any, b: => Any, c: => Any, d: => Any, e: => Rep[T]): Rep[T] = begin_macro(a, b, c, d, e)
+  override def newMyArr[A]: Rep[Unit] = List("my_arr_new")
   override def myArr[A]: Arr[A] = List("my_arr")
   override def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = List("arr_get", a, i)
-  override def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = List("arr_put", i, v)
+  override def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Rep[Any] = List("arr_put", a, i, v)
   override def fun[A,B](name: String)(f: Rep[A]=>Rep[B]): Fun[A,B] = {
     val arg = fresh_var[A]
     _funs.get(name) match {
@@ -975,38 +991,33 @@ trait ProgramSieve extends Program[Int,Int] { z =>
     import c._
     val id_n = 0
     val id_i = 1
+    def primes = myArr[Int]
+    def n = primes(id_n)
+    def i = primes(id_i)
     def init: Fun[Int,Unit] = fun("init") {i: Rep[Int] =>
-      val primes = myArr[Int]
-      val n = primes(id_n)
-      primes(i) = 1
-      if (i === n) unit
-      else init(i+1)
+      begin(
+        (primes(i) = 1),
+        (if (i === n) unit else init(i+1)))
     }
     def mark: Fun[Int,Unit] = fun("mark") {k: Rep[Int] =>
-      val primes = myArr[Int]
-      val n = primes(id_n)
-      val i = primes(id_i)
       if ((n+1) <= k) unit
       else begin(
-        primes(k) = 0,
-        mark(k+i))
+        (primes(k) = 0),
+        (mark(k+i)))
     }
     def algo: Fun[Int,Unit] = fun("algo") {i: Rep[Int] =>
-      val primes = myArr[Int]
-      val n = primes(id_n)
-      primes(id_i) = i
-      if (primes(i) === 0) unit
-      else mark(i+i)
-      if (i === n) unit
-      else algo(i+1)
-    }
-    def sieve: Fun[Int,Int] = fun("sieve") { n: Rep[Int] =>
-      val primes = newMyArr[Int]
       begin(
-        primes(id_n) = n,
-        init(2),
-        algo(2),
-        primes(n))
+        (primes(id_i) = i),
+        (if (primes(i) === 0) unit else mark(i+i)),
+        (if (i === n) unit else algo(i+1)))
+    }
+    def sieve: Fun[Int,Int] = fun("sieve") { x: Rep[Int] =>
+      begin(
+        (newMyArr[Int]),
+        (primes(id_n) = x),
+        (init(2)),
+        (algo(2)),
+        (primes(x)))
     }
     new P[Int,Int] {
       def f = sieve
