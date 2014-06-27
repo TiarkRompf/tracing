@@ -210,8 +210,8 @@ trait Lang {
   type Fun[A,B]
 
   type Arr[A]
-  def newArr[A](name: String): Arr[A]
-  def getArr[A](name: String): Arr[A]
+  def newMyArr[A]: Arr[A]
+  def myArr[A]: Arr[A]
   implicit class ArrayOps[A](a: Arr[A]) {
     def apply(i:Rep[Int]):Rep[A] = arr_apply(a, i)
     def update(i:Rep[Int],v:Rep[A]):Arr[A] = arr_update(a, i, v)
@@ -257,6 +257,11 @@ trait Lang {
 
 trait LangX extends Lang {
   type Term
+
+  def newArr[A](name: String): Arr[A]
+  def getArr[A](name: String): Arr[A]
+  override def newMyArr[A]: Arr[A] = newArr[A]("my_only_array")
+  override def myArr[A]: Arr[A] = getArr[A]("my_only_array")
 
   type Fun2[A,B,C]
   implicit class Fun2Ops[A,B,C](f:Fun2[A,B,C]) {
@@ -675,8 +680,8 @@ trait ProgEval extends LangX {
         lookup(x,cdr(env)))
   }
 
-  def my_arr_new: Term1 = arr(newArr[Term]("my_only_array"))
-  def my_arr: Term1 = arr(getArr[Term]("my_only_array"))
+  def my_arr_new: Term1 = arr(newMyArr[Term])
+  def my_arr: Term1 = arr(myArr[Term])
   def arr_get(a: Term1, i: Term1): Term1 = arr_apply(toArr(a), toInt(i))
   def arr_put(a: Term1, i: Term1, v: Term1): Term1 = arr(arr_update(toArr(a), toInt(i), v))
 
@@ -772,10 +777,10 @@ trait Code2Data extends Lang {
     counter += 1
     "x"+counter
   }
-  def newArr[A](name: String): Arr[A] = List("new_arr", name)
-  def getArr[A](name: String): Arr[A] = List("get_arr", name)
-  def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = List("arr_apply", a, i)
-  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = List("arr_update", i, v)
+  def newMyArr[A]: Arr[A] = List("my_arr_new")
+  def my_arr[A]: Arr[A] = List("my_arr")
+  def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = List("arr_get", a, i)
+  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = List("arr_put", i, v)
   def fun[A,B](name: String)(f: Rep[A]=>Rep[B]): Fun[A,B] = {
     val arg = fresh_var[A]
     List("lambda", name, arg, f(arg))
@@ -921,7 +926,7 @@ trait ProgramSieve extends Program[Int,Int] { z =>
     val id_n = 0
     val id_i = 1
     def init: Fun[Int,Unit] = fun("init") {i: Rep[Int] =>
-      val primes = getArr[Int]("primes")
+      val primes = myArr[Int]
       val n = primes(id_n)
       primes(i) = 1
       if (i === n) {
@@ -930,7 +935,7 @@ trait ProgramSieve extends Program[Int,Int] { z =>
       }
     }
     def mark: Fun[Int,Unit] = fun("mark") {k: Rep[Int] =>
-      val primes = getArr[Int]("primes")
+      val primes = myArr[Int]
       val n = primes(id_n)
       val i = primes(id_i)
       if ((n+1) <= k) {
@@ -940,7 +945,7 @@ trait ProgramSieve extends Program[Int,Int] { z =>
       }
     }
     def algo: Fun[Int,Unit] = fun("algo") {i: Rep[Int] =>
-      val primes = getArr[Int]("primes")
+      val primes = myArr[Int]
       val n = primes(id_n)
       primes(id_i) = i
       if (primes(i) === 0) {
@@ -953,7 +958,7 @@ trait ProgramSieve extends Program[Int,Int] { z =>
       }
     }
     def sieve: Fun[Int,Int] = fun("sieve") { n: Rep[Int] =>
-      val primes = newArr[Int]("primes")
+      val primes = newMyArr[Int]
       primes(id_n) = n
       init(2)
       algo(2)
