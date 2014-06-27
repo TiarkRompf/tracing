@@ -209,6 +209,13 @@ trait Lang {
 
   type Fun[A,B]
 
+  def unit: Rep[Unit] = lift(())
+  def begin[T](a: => Any, b: => Rep[T]): Rep[T] = {
+    a;b
+  }
+  def begin[T](a: => Any, b: => Any, c: => Any, d: => Rep[T]): Rep[T] = {
+    a;b;c;d
+  }
   type Arr[A]
   def newMyArr[A]: Arr[A]
   def myArr[A]: Arr[A]
@@ -731,6 +738,13 @@ trait ProgEval extends LangX {
   //
   // TODO #2: meta-interpreter
   //   - 2 levels of interpretation
+
+  def data(x: Any): Term1 = x match {
+    case n: Int => num(n)
+    case s: String => sym(s)
+    case Nil => nil
+    case x::xs => cons(data(x), data(xs))
+  }
 }
 
 
@@ -777,29 +791,35 @@ trait Code2Data extends Lang {
     counter += 1
     "x"+counter
   }
-  def newMyArr[A]: Arr[A] = List("my_arr_new")
-  def my_arr[A]: Arr[A] = List("my_arr")
-  def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = List("arr_get", a, i)
-  def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = List("arr_put", i, v)
-  def fun[A,B](name: String)(f: Rep[A]=>Rep[B]): Fun[A,B] = {
+  def begin_macro(x: Any, xs: Any*): Any = xs match {
+    case Nil => x
+    case _ => List(List("lambda", "_", "_", begin_macro(xs.head, xs.tail:_*)), x)
+  }
+  override def begin[T](a: => Any, b: => Rep[T]): Rep[T] = begin_macro(a, b)
+  override def begin[T](a: => Any, b: => Any, c: => Any, d: => Rep[T]): Rep[T] = begin_macro(a, b, c, d)
+  override def newMyArr[A]: Arr[A] = List("my_arr_new")
+  override def myArr[A]: Arr[A] = List("my_arr")
+  override def arr_apply[A](a: Arr[A], i: Rep[Int]): Rep[A] = List("arr_get", a, i)
+  override def arr_update[A](a: Arr[A], i: Rep[Int], v: Rep[A]): Arr[A] = List("arr_put", i, v)
+  override def fun[A,B](name: String)(f: Rep[A]=>Rep[B]): Fun[A,B] = {
     val arg = fresh_var[A]
     List("lambda", name, arg, f(arg))
   }
-  def fun_apply[A,B](f:Fun[A,B],x:Rep[A]):Rep[B] = List(f, x)
-  implicit def lift[T](x: T): Rep[T] = x
-  def int_equ(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = List("equi", x, y)
-  def int_lte(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = List("ltei", x, y)
-  def int_plus(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("plus", x, y)
-  def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("minus", x, y)
-  def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("times", x, y)
+  override def fun_apply[A,B](f:Fun[A,B],x:Rep[A]):Rep[B] = List(f, x)
+  implicit override def lift[T](x: T): Rep[T] = x
+  override def int_equ(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = List("equi", x, y)
+  override def int_lte(x:Rep[Int],y:Rep[Int]):Rep[Boolean] = List("ltei", x, y)
+  override def int_plus(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("plus", x, y)
+  override def int_minus(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("minus", x, y)
+  override def int_times(x:Rep[Int],y:Rep[Int]):Rep[Int] = List("times", x, y)
 
-  def __ifThenElse[T](c: Rep[Boolean], a: => Rep[T], b: => Rep[T]): Rep[T] = List("ife", a, b)
+  override def __ifThenElse[T](c: Rep[Boolean], a: => Rep[T], b: => Rep[T]): Rep[T] = List("ife", a, b)
 
-  def str_equ(x:Rep[String],y:Rep[String]):Rep[Boolean] = List("equs", x, y)
+  override def str_equ(x:Rep[String],y:Rep[String]):Rep[Boolean] = List("equs", x, y)
 
-  def pair(x: Rep[Any], y: Rep[Any]): Rep[Any] = List("cons", x, y)
-  def fst[A](t: Rep[Any]): Rep[A] = List("car", t)
-  def snd[A](t: Rep[Any]): Rep[A] = List("cdr", t)
+  override def pair(x: Rep[Any], y: Rep[Any]): Rep[Any] = List("cons", x, y)
+  override def fst[A](t: Rep[Any]): Rep[A] = List("car", t)
+  override def snd[A](t: Rep[Any]): Rep[A] = List("cdr", t)
 }
 
 /* ---------- PART 6: tests ---------- */
@@ -838,6 +858,13 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     runLow(p.f, ev(p.a))
     assert(out === ev(p.b))
     if (analyze) report(id+"-low")
+  }
+
+  test(id+": execute in high-level interpreter, which is executed directly") {
+    val c = new LangDirect {}
+    val d = new Code2Data {}
+    val p = program(d)
+    println(p)
   }
 }
 
@@ -903,11 +930,8 @@ trait ProgramFib extends Program[Int,Int] {
   def program(c: Lang): c.P[Int,Int] = {
     import c._
     def fib: Fun[Int,Int] = fun("fib") { n: Rep[Int] =>
-      if (n <= 1) {
-        n
-      } else {
-        fib(n-1)+fib(n-2)
-      }
+      if (n <= 1) n
+      else fib(n-1)+fib(n-2)
     }
     new P[Int,Int] {
       def f = fib
@@ -929,40 +953,34 @@ trait ProgramSieve extends Program[Int,Int] { z =>
       val primes = myArr[Int]
       val n = primes(id_n)
       primes(i) = 1
-      if (i === n) {
-      } else {
-        init(i+1)
-      }
+      if (i === n) unit
+      else init(i+1)
     }
     def mark: Fun[Int,Unit] = fun("mark") {k: Rep[Int] =>
       val primes = myArr[Int]
       val n = primes(id_n)
       val i = primes(id_i)
-      if ((n+1) <= k) {
-      } else {
-        primes(k) = 0
-        mark(k+i)
-      }
+      if ((n+1) <= k) unit
+      else begin(
+        primes(k) = 0,
+        mark(k+i))
     }
     def algo: Fun[Int,Unit] = fun("algo") {i: Rep[Int] =>
       val primes = myArr[Int]
       val n = primes(id_n)
       primes(id_i) = i
-      if (primes(i) === 0) {
-      } else {
-        mark(i+i)
-      }
-      if (i === n) {
-      } else {
-        algo(i+1)
-      }
+      if (primes(i) === 0) unit
+      else mark(i+i)
+      if (i === n) unit
+      else algo(i+1)
     }
     def sieve: Fun[Int,Int] = fun("sieve") { n: Rep[Int] =>
       val primes = newMyArr[Int]
-      primes(id_n) = n
-      init(2)
-      algo(2)
-      primes(n)
+      begin(
+        primes(id_n) = n,
+        init(2),
+        algo(2),
+        primes(n))
     }
     new P[Int,Int] {
       def f = sieve
