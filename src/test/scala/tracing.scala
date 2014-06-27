@@ -24,7 +24,6 @@ TODO:
 /* ---------- PART 1: low-level execution ---------- */
 
 trait Syntax {
-
   def pretty(e: Any): String
 
   case class Block(stms: List[Stm], cont: Jump) {
@@ -39,7 +38,6 @@ trait Syntax {
   case object Done extends Jump
 
   case class Guard(name: Exp, cmp: String, block: Block) extends Jump
-
 
   abstract class Stm
   case class New(a: Exp, b: Exp) extends Stm  // a[b] := new
@@ -60,12 +58,10 @@ trait Syntax {
   case class LessThan(x: Exp, y: Exp) extends Exp
   case class ITE(c: Exp, x: Exp, y: Exp) extends Exp
   case class Get(a: Exp, b: Exp) extends Exp  // a[b]
-  case object Mem extends Exp  
-
+  case object Mem extends Exp
 }
 
 trait Print extends Syntax {
-
   def pretty(e: Any): String = e match {
     case Mem => "mem"
     case c:String => '"'+c+'"'
@@ -92,14 +88,10 @@ trait Print extends Syntax {
 
     case e => e.toString
   }
-
-
-
 }
 
 
 trait Eval extends Syntax with Print {
-
   type Label = String
   type Obj = mutable.Map[Any,Any]
 
@@ -124,7 +116,7 @@ trait Eval extends Syntax with Print {
       println(s"error in ev(${pretty(e)}): $ex")
       e match {
         case Get(a,b) => println(eval[Obj](a))
-        case _ => 
+        case _ =>
       }
       throw ex
   }
@@ -142,11 +134,11 @@ trait Eval extends Syntax with Print {
   } catch {
     case ex =>
       println(s"error in ex(${pretty(prog(name))}): $ex")
-      throw ex    
+      throw ex
   }
-  @scala.annotation.tailrec 
-  final def exec(block: Block): Unit = { 
-    block.stms.foreach(exec); 
+  @scala.annotation.tailrec
+  final def exec(block: Block): Unit = {
+    block.stms.foreach(exec);
     resolve(block.cont) match {
       case TrampoDone =>
       case TrampoLabel(name) =>
@@ -158,10 +150,10 @@ trait Eval extends Syntax with Print {
   }
   def resolve(jump: Jump): Trampoline = jump match {
     case Done => TrampoDone
-    case Goto(l) => 
+    case Goto(l) =>
       TrampoLabel(eval[Label](l))
     case IfElse(c,a,b) => if (eval[Boolean](c)) resolve(a) else resolve(b)
-    case Guard(l,x,b) => 
+    case Guard(l,x,b) =>
       val x1 = eval[Label](l)
       if (x1 == x) TrampoBlock(b)
       else TrampoLabel(x1)
@@ -171,7 +163,6 @@ trait Eval extends Syntax with Print {
     case Put(a,b,c) => (eval[Obj](a))(eval[Any](b)) = eval[Any](c)
     case New(a,b) => (eval[Obj](a))(eval[Any](b)) = new mutable.HashMap
   }
-
 
   def merge(l1: Label, l2: Label) = {
 
@@ -192,16 +183,11 @@ trait Eval extends Syntax with Print {
 
   }
 
-  def mergeAll(ls: List[Label]) = 
+  def mergeAll(ls: List[Label]) =
     if (ls.nonEmpty) for (l2 <- ls.tail) merge(ls.head,l2)
-
 }
 
-
 trait LowLevel extends Syntax with Eval with Print
-
-
-
 
 /* ---------- PART 2: high-level embedded language ---------- */
 
@@ -308,13 +294,11 @@ trait LangDirect extends Lang {
 
   def record(xs: (String,Rep[Any])*): Rep[Term] = Rep(Map() ++ xs)
   def field(x: Rep[Term], k: String): Rep[Term] = x.x(k).asInstanceOf[Rep[Term]]
-
 }
 
 // translation to low-level target
 
 trait LangLowLevel extends Lang with LowLevel {
-
   var label = "main"
   var stms: List[Stm] = Nil
 
@@ -393,7 +377,7 @@ trait LangLowLevel extends Lang with LowLevel {
   type Fun2[A,B,C] = Fun[Term,C]
 
   def fun2[A,B,C](name: String)(f: (Val[A],Val[B])=>Val[C]): Fun2[A,B,C] = {
-    fun(name) { x: Rep[Term] => 
+    fun(name) { x: Rep[Term] =>
       f(field(x,"1").asInstanceOf[Rep[A]],
         field(x,"2").asInstanceOf[Rep[B]])
     }
@@ -419,7 +403,6 @@ trait LangLowLevel extends Lang with LowLevel {
     val sp = Get(Mem,"sp")
     val fp = Get(sp,sd)
 
-
     label = uthen
     stms = Nil
     val x = a
@@ -435,9 +418,7 @@ trait LangLowLevel extends Lang with LowLevel {
     label = ucont
     stms = Nil
     Get(fp,ures)
-
   }
-
 
   implicit def lift[T](x: T) = Const(x)
 
@@ -458,7 +439,6 @@ trait LangLowLevel extends Lang with LowLevel {
 
   def field(x: Rep[Term], k: String): Rep[Term] = Get(x,k)
 }
-
 
 trait RunLowLevel extends LangLowLevel {
 
@@ -488,12 +468,9 @@ trait RunLowLevel extends LangLowLevel {
 
     //mem foreach println
   }
-
 }
 
-
 trait ProgFac extends Lang {
-
   def fac: Fun[Int,Int] = fun("fac") { n: Rep[Int] =>
     if (n === 0) {
       1
@@ -501,7 +478,6 @@ trait ProgFac extends Lang {
       n * fac(n - 1)
     }
   }
-
 }
 
 trait ProgPascal extends Lang {
@@ -529,7 +505,6 @@ trait ProgNested extends Lang {
 }
 
 trait ProgFib extends Lang {
-
   def fib: Fun[Int,Int] = fun("fac") { n: Rep[Int] =>
     if (n <= 1) {
       n
@@ -537,7 +512,6 @@ trait ProgFib extends Lang {
       fib(n-1)+fib(n-2)
     }
   }
-
 }
 
 trait ProgSieve extends Lang {
@@ -586,185 +560,7 @@ trait ProgSieve extends Lang {
 
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
 
-trait AnalyzeOld extends RunLowLevel {
-
-  def splitWhere[T](xs0: Seq[T])(f: T => Boolean): List[Seq[T]] = { 
-    val buf = new scala.collection.mutable.ListBuffer[Seq[T]]
-    var xs = xs0
-    while (true) {
-      val i = xs.indexWhere(f) 
-      if (i < 0) {
-        buf += xs
-        return buf.result
-      } else { 
-        val (h,t) = xs.splitAt(i+1)
-        buf += h
-        xs = t
-      } 
-    }
-    throw new Exception
-  }
-  assert(splitWhere(List(1,2,3,4,5,6,7,8,9))(_ % 4 == 0) == 
-    List(List(1, 2, 3, 4), List(5, 6, 7, 8), List(9)))
-
-
-  def runImprove[A,B](f: Fun[A,B], arg: A) = {
-    run(f, arg)
-
-    /*
-      what does an interpreter do:
-
-        it has a dispatch block A
-        it has a block for each instruction B C D 
-
-      a user program is made up of blocks U V W 
-      containing list of instructions: 
-        U=[BDCB] V=[CBD] W=[B].
-
-      the trace for executing U V W is:
-
-        ABADACAB ACABAD AB
-      
-      ----------------------------------------------
-
-      current (offline) algorithm idea:
-
-        let's assume a trace like this
-
-          ... ABACADABABACADAB ...
-
-        find the hottest spot: A
-
-          ... ABACADABABACADAB ...
-              ^ ^ ^ ^ ^ ^ ^ ^ 
-
-        this is our dispatch site.
-        we should treat AB AC AD as instructions.
-
-        now find the hottest tracelet = instruction: AB
-
-          ... AB AC AD AB AB AC AD AB ...
-              ^        ^  ^        ^
-
-        <caveat>
-
-          now it would be tempting to fuse AB and call it a day.
-          this won't work, because we'd be replacing A and thus
-          each AC or AD call would bail out after 
-          the A part of AB!!!!!
-
-          we need to consider larger pieces in one go.
-
-        </caveat>
-
-        we repeat the process to get coarser granularity
-
-
-      ----------------------------------------------
-
-      online algorithm idea:
-
-        look at control transfers A->B
-        find the most specific hot transfer
-
-        AB is hot but not specific, because AC and AD also common
-
-        BA is very specific and also hot --> merge!
-
-        (also: return path profiling for `foreach { x => ... }`
-
-    */
-
-
-    val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
-
-    println("10 hotspots")
-    hotspots.take(10).foreach(p=>println(p._2+"*"+p._1))
-
-    val tracelets = splitWhere(trace)(_ == hotspots.head._1)
-
-    val hottracelets = tracelets.groupBy(x=>x).map{case(k,v)=>(k,v.length)}.toSeq.sortBy(-_._2)
-
-    println
-    println("5 hot traces")
-    hottracelets.take(5).foreach(p=>println(p._2+"*"+p._1.mkString(" ")))
-
-    val hottest = hottracelets.head._1.toList
-
-    println
-    println("merge: "+hottest)
-    mergeAll(hottest)
-
-    println
-  }
-
-/*  runImprove()
-  runImprove()
-  runImprove()
-  runImprove()
-  runImprove() */
-
-  prog.foreach(println)
-
-/*
-  val trace0 = trace
-
-  val rawlog = trace
-
-  val hotspots = rawlog.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
-
-  println("10 hotspots")
-  hotspots.take(10).foreach(p=>println(p._2+"*"+p._1))
-
-
-
-  val traces = splitWhere(rawlog)(_ == hotspots.head._1)
-
-  val hottraces = traces.groupBy(x=>x).map{case(k,v)=>(k,v.length)}.toSeq.sortBy(-_._2)
-
-  println
-  println("5 hot traces")
-  //hottraces.take(5).foreach{case(t,c)=>println("---"+c);t.foreach(println)}
-  hottraces.take(10).foreach(p=>println(p._2+"*"+p._1.mkString(" ")))
-
-
-  println
-
-  // trace multiple levels
-
-  def trace1(ppoints0: Seq[Any], norm: Boolean = true) = new {
-    val points = ppoints0
-    val uniqueMap = points.distinct.toSeq.zipWithIndex.toMap
-    val normPoints = if (!norm) points else points map uniqueMap // OOM for points=rawlog if norm=true
-
-    val hotPoints = normPoints.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
-
-    val traces = splitWhere(normPoints)(_ == hotPoints.head._1)
-  }
-
-
-  val traces2 = trace1(traces)
-  val traces3 = trace1(traces2.traces)
-  val traces4 = trace1(traces3.traces)
-  val traces5 = trace1(traces4.traces)
-
-  println(traces2.hotPoints)
-  //ArrayBuffer((54,89889), (69,27995), (53,24612), (167,23311), (170,22505), (171,22411), (182,20959), (217,13401), (103,12887), (113,12886), (180,12881), (204,11039), (184,10400), (172,10400), (197,10200), (317,10120), (318,10120), (320,10000), (321,10000), (154,3146), (82,2131), (143,1614), (160,1505), (162,1105), (159,1103), (158,1003), (203,916), (252,800), (355,716), (142,703), (181,609), (199,608), (202,607), (201,607), (205,607), (164,600), (237,517), (185,504), (206,504), (183,504), (178,504), (179,503), (176,503), (351,500), (177,429), (207,429), (189,402), (192,402), (191,402), (194,402), (190,402), (195,402), (308,401), (157,400), (168,400), (146,400), (163,400), (229,307), (243,306), (362,305), (123,305), (125,303), (124,303), (129,303), (134,303), (128,303), (148,303), (149,303), (223,303), (127,303), (72,303), (126,303), (122,303), (175,301), (138,300), (153,300), (152,300), (156,300), (169,300), (193,300), (173,300), (244,300), (166,300), (161,300), (155,300), (336,300), (186,300), (200,300), (150,230), (151,229), (209,206), (135,203), (231,202), (140,201), (247,200), (174,200), (196,200), (253,200), (133,200), (233,200), (248,200), (165,200), (188,200), (187,200), (245,200), (345,200), (198,200), (255,200), (145,200), (346,200), (136,200), (232,200), (259,199), (376,111), (375,111), (374,111), (373,111), (316,110), (319,110), (315,110), (234,105), (225,105), (242,105), (216,103), (238,103), (307,103), (220,103), (224,103), (298,103), (236,103), (230,103), (213,103), (240,103), (226,103), (304,103), (300,103), (227,103), (215,103), (222,103), (366,102), (367,102), (306,102), (368,102), (378,102), (305,102), (364,102), (365,101), (52,101), (372,101), (228,101), (371,101), (311,101), (241,101), (370,101), (218,101), (235,101), (214,101), (239,101), (358,101), (369,101), (347,100), (333,100), (249,100), (352,100), (340,100), (257,100), (344,100), (353,100), (147,100), (132,100), (334,100), (137,100), (361,100), (356,100), (141,100), (256,100), (339,100), (343,100), (335,100), (350,100), (274,100), (377,100), (251,100), (330,100), (342,100), (310,100), (338,100), (250,100), (363,100), (258,100), (139,100), (273,100), (341,100), (332,100), (131,100), (254,100), (322,100), (337,100), (354,100), (309,100), (323,99), (313,93), (385,92), (384,92), (383,92), (387,90), (386,90), (210,90), (388,75), (389,74), (394,74), (395,74), (221,66), (357,63), (349,63), (360,63), (359,63), (24,59), (23,59), (396,37), (392,37), (393,37), (391,37), (390,37), (408,10), (407,10), (379,9), (380,9), (41,9), (409,9), (34,8), (208,8), (299,8), (312,7), (60,7), (381,7), (59,7), (382,7), (40,7), (42,6), (74,6), (70,6), (73,6), (71,6), (39,6), (75,6), (268,6), (437,6), (283,6), (38,4), (290,4), (277,4), (83,4), (37,3), (421,3), (219,3), (438,3), (441,3), (246,3), (287,3), (36,3), (276,2), (269,2), (288,2), (301,2), (436,2), (284,2), (289,2), (261,2), (443,2), (280,2), (293,2), (265,2), (292,2), (452,2), (270,2), (297,2), (275,2), (33,2), (92,2), (285,2), (266,2), (279,2), (444,2), (423,2), (286,2), (291,2), (281,2), (445,2), (144,2), (76,2), (303,2), (271,2), (108,2), (399,2), (278,2), (267,2), (35,2), (295,2), (282,2), (263,2), (31,2), (314,2), (26,2), (272,2), (262,2), (422,2), (294,2), (47,2), (442,2), (101,1), (0,1), (88,1), (115,1), (5,1), (449,1), (120,1), (440,1), (10,1), (56,1), (404,1), (417,1), (25,1), (14,1), (110,1), (460,1), (20,1), (46,1), (93,1), (416,1), (325,1), (448,1), (57,1), (78,1), (29,1), (211,1), (106,1), (121,1), (348,1), (84,1), (397,1), (61,1), (453,1), (89,1), (411,1), (116,1), (428,1), (1,1), (6,1), (117,1), (439,1), (85,1), (102,1), (302,1), (260,1), (28,1), (424,1), (429,1), (21,1), (65,1), (435,1), (97,1), (329,1), (461,1), (456,1), (324,1), (403,1), (9,1), (420,1), (109,1), (328,1), (77,1), (212,1), (96,1), (457,1), (13,1), (105,1), (2,1), (398,1), (412,1), (425,1), (430,1), (32,1), (264,1), (45,1), (64,1), (296,1), (17,1), (402,1), (22,1), (44,1), (118,1), (27,1), (413,1), (12,1), (49,1), (86,1), (406,1), (419,1), (81,1), (451,1), (7,1), (434,1), (98,1), (91,1), (66,1), (130,1), (455,1), (3,1), (431,1), (80,1), (426,1), (112,1), (458,1), (48,1), (63,1), (18,1), (414,1), (95,1), (327,1), (50,1), (67,1), (331,1), (16,1), (11,1), (446,1), (43,1), (450,1), (99,1), (87,1), (104,1), (55,1), (114,1), (401,1), (418,1), (8,1), (119,1), (58,1), (433,1), (447,1), (432,1), (410,1), (30,1), (51,1), (405,1), (19,1), (326,1), (107,1), (4,1), (79,1), (400,1), (94,1), (415,1), (427,1), (459,1), (15,1), (68,1), (62,1), (90,1), (111,1), (454,1), (100,1))
-
-  println(traces3.hotPoints)
-  //ArrayBuffer((29,20959), (136,10120), (36,10100), (141,10000), (140,10000), (139,10000), (15,1614), (40,916), (14,703), (28,609), (41,607), (42,504), (27,503), (26,429), (38,303), (18,303), (20,300), (32,300), (22,300), (67,300), (23,300), (30,300), (65,201), (10,200), (24,200), (33,200), (59,200), (39,200), (35,200), (31,200), (68,200), (79,198), (138,110), (137,110), (135,110), (44,106), (125,103), (170,102), (169,102), (124,102), (166,102), (56,101), (57,101), (164,101), (61,101), (60,101), (165,101), (64,101), (49,101), (66,101), (167,101), (48,101), (63,101), (50,101), (55,101), (51,101), (163,101), (62,101), (153,100), (37,100), (25,100), (157,100), (152,100), (78,100), (132,100), (74,100), (70,100), (21,100), (97,100), (77,100), (13,100), (129,100), (73,100), (128,100), (34,100), (148,100), (17,100), (149,100), (71,100), (12,100), (159,100), (76,100), (162,100), (123,100), (145,100), (150,100), (127,100), (11,100), (99,100), (158,100), (75,100), (151,100), (168,100), (146,100), (19,100), (126,100), (131,100), (142,99), (98,99), (72,99), (133,93), (174,92), (176,92), (175,92), (45,90), (182,74), (54,66), (53,65), (147,64), (160,63), (156,63), (161,63), (155,63), (177,54), (185,37), (179,37), (180,37), (181,37), (178,37), (184,36), (186,36), (183,36), (204,10), (203,10), (205,9), (171,9), (43,8), (173,7), (172,7), (130,7), (219,6), (107,6), (102,4), (103,4), (52,3), (69,2), (101,2), (234,2), (88,2), (115,2), (110,2), (93,2), (106,2), (121,2), (84,2), (89,2), (117,2), (85,2), (192,2), (92,2), (224,2), (109,2), (225,2), (96,2), (134,2), (105,2), (191,2), (118,2), (113,2), (108,2), (223,2), (112,2), (95,2), (16,2), (218,2), (114,2), (119,2), (82,2), (94,2), (90,2), (111,2), (122,2), (83,2), (0,1), (217,1), (5,1), (120,1), (202,1), (196,1), (189,1), (46,1), (228,1), (216,1), (211,1), (238,1), (221,1), (116,1), (1,1), (206,1), (233,1), (6,1), (201,1), (220,1), (229,1), (197,1), (9,1), (188,1), (193,1), (212,1), (237,1), (2,1), (144,1), (236,1), (86,1), (187,1), (81,1), (230,1), (7,1), (208,1), (213,1), (91,1), (198,1), (226,1), (3,1), (80,1), (209,1), (194,1), (199,1), (154,1), (143,1), (231,1), (87,1), (104,1), (8,1), (58,1), (235,1), (207,1), (214,1), (190,1), (210,1), (239,1), (4,1), (195,1), (47,1), (200,1), (227,1), (215,1), (222,1), (232,1), (100,1))
-
-  println(traces4.hotPoints)
-  //ArrayBuffer((17,10120), (19,10000), (18,110), (20,99), (10,98), (6,98), (15,92), (2,90), (26,56), (27,52), (33,35), (32,35), (39,10), (40,9), (1,8), (14,7), (24,6), (25,5), (23,4), (28,2), (0,1), (5,1), (42,1), (37,1), (29,1), (38,1), (21,1), (9,1), (13,1), (41,1), (34,1), (22,1), (12,1), (7,1), (3,1), (35,1), (16,1), (31,1), (11,1), (43,1), (8,1), (36,1), (30,1), (4,1))
-
-  println(traces5.hotPoints)
-  //ArrayBuffer((2,9900), (1,110), (3,99), (5,9), (0,1), (6,1), (4,1))
-*/
-}
-
-
 trait Analyze extends RunLowLevel {
-
   def report(s1:String) = {
     val traceB = this.trace
 
@@ -774,16 +570,13 @@ trait Analyze extends RunLowLevel {
     }
 
     // map blocks in trace to numeric indexes
-
     println("block <-> index:")
     val indexToBlock = traceB.distinct.toArray
     val blockToIndex = indexToBlock.zipWithIndex.toMap
     println(blockToIndex)
 
     var trace = traceB map blockToIndex
-
     // merge nodes
-
     val mergeHist = ((0 until indexToBlock.length) map (i => Vector(i))).toArray
 
     def merge(xs: List[Int]) = {
@@ -798,7 +591,6 @@ trait Analyze extends RunLowLevel {
     }
 
     // export graph viz
-
     val dir = new File(s"graphs-$s1")
     dir.mkdirs
     dir.listFiles.foreach(_.delete)
@@ -807,16 +599,12 @@ trait Analyze extends RunLowLevel {
 
     def printGraph(s2:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int]) = {
       val out = new PrintStream(new File(dir,s"g$s2.dot"))
-
       out.println("digraph G {")
       //out.println("rankdir=LR")
-
       /*out.println("""struct1 [shape=plaintext label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"><TR><TD>""")
-
       out.println("foo1<BR/>")
       out.println("foo2<BR/>")
       out.println("foo3<BR/>")
-
       out.println("""</TD></TR></TABLE>>];""")*/
 
       val fmax = freq.values.max
@@ -828,30 +616,23 @@ trait Analyze extends RunLowLevel {
         val size = mergeHist(a).length
         out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" penwidth="${fw}" shape=box]""")
       }
-
       for (((a,b),f) <- edgefreq) {
         val fw = scale(f)
         out.println(s"""L$a -> L$b [label=\"$f\" weight="$f" penwidth="${fw}"]""")
       }
-      
       out.println("}")
       out.close()
-
       import scala.sys.process._
-
       s"dot -Tpdf -O $dir/g$s2.dot".!
     }
 
     // perform one step of analysis/transformation
-
     def analyze(step: Int): Unit = {
       if (step > 500) return println("ABORT")
 
       println(s"/* analysis pass $step */")
       // compute frequencies, sort to find hotspots
-
       val freq = trace.collectBy(x=>x, _.length)
-
       println("hotspots:")
       val hotspots = freq.toSeq.sortBy(-_._2)
       hotspots.take(10).foreach(println)
@@ -861,39 +642,32 @@ trait Analyze extends RunLowLevel {
       println("hottest")
       println(hottest)
       println(indexToBlock(hottest._1) + " -> " + hottest._2)
-
       println()
 
       // compute hot edges
-
       val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
 
       println("hot edges:")
       val hotedges = edgefreq.toSeq.sortBy(-_._2)
       hotedges.take(10).foreach(println)
       println()
-
       printGraph("%03d".format(step))(freq,edgefreq)
 
       val hottestEdge = hotedges.head
-
       println("hottest")
       println(hottestEdge)
       //println(indexToBlock(hottest._1) + " -> " + hottest._2)
-
       println()
 
       // compute pred/succ sets, specificity
 
       val pred = (trace zip trace.drop(1)) collectBy(_._2, _.map(_._1).distinct);
       val succ = (trace zip trace.drop(1)) collectBy(_._1, _.map(_._2).distinct);
-
       for ((h,_) <- hotspots.take(10)) {
         println(pred.getOrElse(h,Vector.empty) + " --> " + h + " --> " + succ.getOrElse(h,Vector.empty))
       }
 
       val max = hotspots.length
-
       for (deg   <- max to 0 by -1; // outdegree
            (h,f) <- hotspots if pred contains h) {
         var hit = false
@@ -914,33 +688,25 @@ trait Analyze extends RunLowLevel {
         }
         if (hit) return analyze(step + 1)
       }
-
     }
 
     try {
       analyze(0)
-
       println()
       println("merge history:")
       mergeHist.filter(_.length > 1).foreach(println)
-
     } finally {
       // join all pdfs
       import scala.sys.process._
-      (s"./pdfjoin.sh -o $combinedPdf " + 
+      (s"./pdfjoin.sh -o $combinedPdf " +
         dir.listFiles.filter(_.getName.endsWith(".pdf")).mkString(" ")).!!
     }
-
   }
-
 }
-
-
 
 /* ---------- PART 4: high-level term interpreter ---------- */
 
 trait ProgEval extends Lang {
-
   type Term1 = Rep[Term]
 
   def arr[A](x: Arr[A]): Term1 = record("tag"->lift("arr"),"val"->x.asInstanceOf[Rep[Any]])
@@ -970,7 +736,6 @@ trait ProgEval extends Lang {
   def isNumber(x: Term1): Term1 = if (str_equ(tagOf(x), lift("num"))) num(1) else num(0)
   def isSymbol(x: Term1): Term1 = if (str_equ(tagOf(x), lift("sym"))) num(1) else num(0)
 
-
   def lookup: Fun2[Term,Term,Term] = fun2("lookup") { (x,env) =>
     ife(equs(x, car(car(env))), cdr(car(env)),
         lookup(x,cdr(env)))
@@ -981,8 +746,8 @@ trait ProgEval extends Lang {
   def arr_get(a: Term1, i: Term1): Term1 = arr_apply(toArr(a), toInt(i))
   def arr_put(a: Term1, i: Term1, v: Term1): Term1 = arr(arr_update(toArr(a), toInt(i), v))
 
-  def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) => 
-    ife(isNumber(e),                  e, 
+  def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) =>
+    ife(isNumber(e),                  e,
     ife(isSymbol(e),                  lookup(e,env),
     ife(equs(sym("lambda"), car(e)),  cons(e,env),
     ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
@@ -1013,7 +778,7 @@ trait ProgEval extends Lang {
 
 
   def list(xs: Term1*): Term1 = if (xs.isEmpty) nil else cons(xs.head, list(xs.tail:_*))
-  
+
   def or(x: Term1, y: Term1) = list("ife", x, num(1), y)
   def dec(x: Term1): Term1 = list("minus", x, num(1))
   def inc(x: Term1): Term1 = list("plus", x, num(1))
@@ -1034,7 +799,7 @@ trait ProgEval extends Lang {
     val term1 = list(id, 7)
 
     val fac = list("lambda", "fac", "n",
-      list("ife", list("equi",0,"n"), 
+      list("ife", list("equi",0,"n"),
         num(1),
         list("times","n",list("fac",list("minus","n",1)))))
 
@@ -1122,12 +887,11 @@ trait ProgEval extends Lang {
   //   - 1 level of interpretation
   //
   // TODO #2: meta-interpreter
-  //   - 2 levels of interpretation  
+  //   - 2 levels of interpretation
 }
 
 
 trait RunHighLevel extends ProgEval with LangLowLevel {
-
   def runProg(code: =>Term1) = {
     //println(eval(id,nil))
 
@@ -1157,9 +921,7 @@ trait RunHighLevel extends ProgEval with LangLowLevel {
     exec("main")
 
   }
-
 }
-
 
 /* ---------- PART 5: tests ---------- */
 
@@ -1235,7 +997,7 @@ trait TestBase extends LowLevel {
     test1b
     test2a
     test2b
-  
+
 /*
 output:
 
