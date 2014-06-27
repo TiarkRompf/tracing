@@ -917,6 +917,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     import i._
     runProg(list(sym(fn), data(p.a)), global_env(d.order, d.funs))
     assert(out === ev(data(p.b)))
+    if (analyze) report(id+"-high")
   }
 }
 
