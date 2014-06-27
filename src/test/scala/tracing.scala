@@ -327,7 +327,10 @@ trait LangDirect extends LangX {
   type Term = Map[String,Rep[Any]]
 
   def record(xs: (String,Rep[Any])*): Rep[Term] = Rep(Map() ++ xs)
-  def field(x: Rep[Term], k: String): Rep[Term] = x.x(k).asInstanceOf[Rep[Term]]
+  def field(x: Rep[Term], k: String): Rep[Term] = x.x.get(k) match {
+    case Some(v) => v.asInstanceOf[Rep[Term]]
+    case None => throw new NoSuchElementException("key not found: "+k+" in "+x)
+  }
 }
 
 // translation to low-level target
