@@ -711,8 +711,10 @@ trait ProgEval extends LangX {
   def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) =>
     ife(isNumber(e),                  e,
     ife(isSymbol(e),                  lookup(e,env),
-    ife(equs(sym("lambda"), car(e)),  cons(e,env),
+    ife(equs(sym("lambda"), car(e)),       cons(e,env),
     ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
+    ife(equs(sym("isNumber"), car(e)),isNumber(eval(car(cdr(e)),env)),
+    ife(equs(sym("isSymbol"), car(e)),isSymbol(eval(car(cdr(e)),env)),
     ife(equs(sym("equs"), car(e)),    equs(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("equi"), car(e)),    equi(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("ltei"), car(e)),    ltei(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
@@ -732,7 +734,7 @@ trait ProgEval extends LangX {
       //println("CAR(CDR(e)): "+car(cdr((e))))
                                          apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
     }
-    )))))))))))))))))
+    )))))))))))))))))))
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
@@ -860,6 +862,28 @@ trait Code2Data extends Lang {
 
   def funs: Map[String,Any] = _funs.toMap
   def order: List[String] = _order
+}
+
+trait Code2DataProgEval extends ProgEval with Code2Data {
+  override def cons(x: Term1, y: Term1): Term1 = List("cons", x, y)
+  override def car(x: Term1): Term1 = List("car", x)
+  override def cdr(x: Term1): Term1 = List("cdr", x)
+
+  override def ife(c: Term1, a: =>Term1, b: => Term1): Term1 = List("ife", c, a, b)
+  override def plus(x: Term1, y: Term1): Term1 = List("plus", x, y)
+  override def minus(x: Term1, y: Term1): Term1 = List("minus", x, y)
+  override def times(x: Term1, y: Term1): Term1 = List("times", x, y)
+  override def equs(x: Term1, y: Term1): Term1 = List("equs", x, y)
+  override def equi(x: Term1, y: Term1): Term1 = List("equi", x, y)
+  override def ltei(x: Term1, y: Term1): Term1 = List("ltei", x, y)
+
+  override def isNumber(x: Term1): Term1 = List("isNumber", x)
+  override def isSymbol(x: Term1): Term1 = List("isSymbol", x)
+
+  override def my_arr_new: Term1 = List("my_arr_new")
+  override def my_arr: Term1 = List("my_arr")
+  override def arr_get(a: Term1, i: Term1): Term1 = List("arr_get", a, i)
+  override def arr_put(a: Term1, i: Term1, v: Term1): Term1 = List("arr_update", a, i, v)
 }
 
 /* ---------- PART 6: tests ---------- */
