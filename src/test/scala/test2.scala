@@ -782,19 +782,53 @@ trait Analyze extends RunLowLevel {
 
     var trace = traceB map blockToIndex
 
+    // XXX
+    // try example from PLDI'09 paper
+    //trace = Vector(1,2,3,5,2,4,5,2,3,5,2,4,5,2,3,5,2,4,5,2,3,5,2,4,5,2,3,5,2,4,5,6)
+
     // merge nodes
 
-    val mergeHist = ((0 until indexToBlock.length) map (i => Vector(i))).toArray
+    var count = indexToBlock.length
+
+    val mergeHist = new Array[Vector[Int]](10000)
+    for (i <- 0 until mergeHist.length)
+      mergeHist(i) = Vector(i)
 
     def merge(xs: List[Int]) = {
       val List(a,b) = xs
       mergeHist(a) = mergeHist(a) ++ mergeHist(b)
       val str0 = trace.mkString(";",";;",";")
       val str1 = str0.replaceAll(s";$a;;$b;",s";$a;")
-      //println(str0)
-      //println(str1)
       trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
-      println(trace)
+      //println(trace)
+    }
+
+    def dup(xs: List[Int]) = {
+      val List(a,b) = xs
+      val c = count
+      count += 1
+      mergeHist(c) = mergeHist(b)
+      val str0 = trace.mkString(";",";;",";")
+      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;;$c;")
+      println(str0)
+      println(str1)
+      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      //println(trace)
+    }
+
+
+    // find max iteration count
+
+    def maxloopcount(a: Int): Int = {
+      var k = 0
+      val str0 = trace.mkString(";",";;",";")
+      var search = s";$a;"
+      while (true) {
+        if (!str0.contains(search)) return k
+        k += 1
+        search = search + s";$a;"
+      }
+      k
     }
 
     // export graph viz
@@ -805,7 +839,7 @@ trait Analyze extends RunLowLevel {
     val combinedPdf = new File(s"graphs-all-$s1.pdf")
     if (combinedPdf.exists) combinedPdf.delete
 
-    def printGraph(s2:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int]) = {
+    def printGraph(s2:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
       val out = new PrintStream(new File(dir,s"g$s2.dot"))
 
       out.println("digraph G {")
@@ -823,16 +857,37 @@ trait Analyze extends RunLowLevel {
       val pmax = 15
       def scale(f: Double) = if (fmax <= pmax) f else f/fmax * pmax
 
+      val nodes = (edges.map(_._1)) //++ edges.map(_._2)).distinct
+
       for ((a,f) <- freq) {
         val fw = scale(f)
         val size = mergeHist(a).length
-        out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" penwidth="${fw}" shape=box]""")
+
+        val color = if (nodes contains a) "red" else "black"
+
+        out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" color="$color" penwidth="${fw}" shape=box]""")
       }
 
       for (((a,b),f) <- edgefreq) {
         val fw = scale(f)
-        out.println(s"""L$a -> L$b [label=\"$f\" weight="$f" penwidth="${fw}"]""")
+
+        val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
+        val color = if (edges contains (a,b)) "red" else "black"
+
+        out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="$f" color="$color" penwidth="${fw}"]""")
       }
+
+      /* draw edge hop frequences:  a -> ? -> b */
+      /*
+      for (((a,b),f) <- edgehopfreq) {
+        val fw = 0.5
+
+        val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
+        val color = "green"
+
+        out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="0" color="$color" penwidth="${fw}"]""")
+      }
+      */
       
       out.println("}")
       out.close()
@@ -860,20 +915,22 @@ trait Analyze extends RunLowLevel {
 
       println("hottest")
       println(hottest)
-      println(indexToBlock(hottest._1) + " -> " + hottest._2)
+      //println(indexToBlock(hottest._1) + " -> " + hottest._2)
 
       println()
 
       // compute hot edges
 
       val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
+      val edgetripfreq = (trace zip trace.drop(1) zip trace.drop(2)) collectBy(x=>(x._1._1,x._1._2,x._2), _.length);
+      val edgehopfreq = (trace zip trace.drop(1) zip trace.drop(2)) collectBy(x=>(x._1._1,x._2), _.length);
+
+      if (edgefreq.isEmpty) return
 
       println("hot edges:")
       val hotedges = edgefreq.toSeq.sortBy(-_._2)
       hotedges.take(10).foreach(println)
       println()
-
-      printGraph("%03d".format(step))(freq,edgefreq)
 
       val hottestEdge = hotedges.head
 
@@ -882,6 +939,18 @@ trait Analyze extends RunLowLevel {
       //println(indexToBlock(hottest._1) + " -> " + hottest._2)
 
       println()
+
+      println("hot edge triples:")
+      val hotedgestrip = edgetripfreq.toSeq.sortBy(-_._2)
+      hotedgestrip.take(10).foreach(println)
+      println()
+
+      println("hot edge hops:")
+      val hotedgeshop = edgehopfreq.toSeq.sortBy(-_._2)
+      hotedgeshop.take(10).foreach(println)
+      println()
+
+
 
       // compute pred/succ sets, specificity
 
@@ -892,28 +961,109 @@ trait Analyze extends RunLowLevel {
         println(pred.getOrElse(h,Vector.empty) + " --> " + h + " --> " + succ.getOrElse(h,Vector.empty))
       }
 
-      val max = hotspots.length
+      println()
 
-      for (deg   <- max to 0 by -1; // outdegree
-           (h,f) <- hotspots if pred contains h) {
-        var hit = false
-        if (succ contains h) {
-          // among the hottest hotspots, pick the one with the largest outdegree
-          if (succ(h).size == deg) {
-            // if it's a loop don't bother -- don't start peeling iterations
-            if (!(succ(h) contains h)) {
-              for (p <- pred(h) if succ(p).size == 1) {
-                println(s" -----> merge $p,$h")
-                if (p != h) {
-                  merge(List(p,h))
-                  hit = true
-                } else println("EEE")
+      for ((h,_) <- hotspots.take(10); ((a,`h`,b), f) <- edgetripfreq) {
+        println(a + " --> " + h + " --> " + b + s" (f=$f)")
+      }
+
+      println()
+
+      val continueAnalyze: () => Nothing = { () => return analyze(step + 1) }
+
+      /* 
+      Trying two variants: (1) considers one node at a time in order
+      of execution frequency, whereas (2) considers all jumps at once.
+
+      The results seem to be about the same, but variant2 does 
+      more work per step and converges faster.
+
+      The main limitation (e.g. for pascal) is that only fully
+      deterministic control transfers are inlined (i.e. A always 
+      followed by B).
+
+      In pascal, these are exhausted at some point.
+
+      So we need a way to "disentangle" the control flow more.
+      Look at triples of nodes (AXB vs AYB) insted of just pairs?
+      */
+
+      /* 
+      VARIANT 2: 
+        Find all deterministic control transfers (node A always calls B)
+        and inline them (unless B is a loop).
+      */
+
+      def variant2(): Unit = {
+        def pred0(x: Int) = pred.getOrElse(x,Seq())
+        def succ0(x: Int) = succ.getOrElse(x,Seq())
+
+        //val isoNodes = hotspots collect { case (h,f) if pred0(h) forall (p => succ(p).size == 1) => h }
+        //val isoEdges = hotedges collect { case ((a,b),f) if isoNodes contains b => (a,b) } // only edge
+
+        val isoNodes = hotspots collect { case (h,f) if !(succ0(h) contains h) || maxloopcount(h) < 3 => h }
+        val isoEdges = hotedges collect { case ((a,b),f) if succ(a).size == 1 && (isoNodes contains b) => (a,b) } // specific transfer
+
+
+        printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(isoEdges)
+
+        val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
+
+        for ((a,b) <- isoEdges)
+          merge(List(a,b))
+
+        if (isoEdges.nonEmpty)
+          continueAnalyze()
+      }
+
+      /* 
+      VARIANT 1: 
+        Pick hottest node with largest outdegree B. Find callers A,
+        who only call B. Inline B into A (unless B is a loop).
+      */
+
+      def variant1(): Unit = {
+        // unroll small loops -- may or may not want to do this
+        /*for ((h,f) <- hotspots if succ contains h) {
+          if ((succ(h) contains h) && maxloopcount(h) <= 3) {
+            println(s" -----> unroll $h,$h")
+            merge(List(h,h))
+            return analyze(step + 1)
+          }
+        }*/
+
+        val max = hotspots.length
+
+        for (deg   <- max to 0 by -1; // outdegree
+             (h,f) <- hotspots if pred contains h) {
+          var hit: List[(Int,Int)] = Nil
+          if (succ contains h) {
+            // among the hottest hotspots, pick the one with the largest outdegree
+            if (succ(h).size == deg) {
+              // if it's a loop don't bother -- don't start peeling iterations
+              if (!(succ(h) contains h)) {
+                for (p <- pred(h) if succ(p).size == 1) {
+                  println(s" -----> merge $p,$h")
+                  if (p != h) {
+                    merge(List(p,h))
+                    hit = ((p,h))::hit
+                  } else println("EEE")
+                }
               }
             }
           }
+          if (hit.nonEmpty) {
+            println(hit)
+            printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(hit)
+            continueAnalyze()
+          }
         }
-        if (hit) return analyze(step + 1)
       }
+
+      variant2()
+
+      // print final graph
+      printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(Nil)
 
     }
 
@@ -923,6 +1073,10 @@ trait Analyze extends RunLowLevel {
       println()
       println("merge history:")
       mergeHist.filter(_.length > 1).foreach(println)
+
+      println()
+      println("final trace:")
+      println(trace)
 
     } finally {
       // join all pdfs
@@ -1275,7 +1429,7 @@ trait PascalTestBase extends LowLevel {
   def test1b: Unit = {
     println("/* translate pascal(pair(3,6)) to low-level code, interpret */")
     new LangLowLevel with RunLowLevel with Analyze with ProgPascal {
-      run(pascal, ev(pair(3,6)))
+      run(pascal, ev(pair(5,10)))
 
       override def report(name: String) = {
         //println(prog)
@@ -1308,7 +1462,7 @@ trait PascalTestBase extends LowLevel {
       runProg(prog1)
     }*/
     new ProgEval with LangLowLevel with RunHighLevel with Analyze {
-      runProg(list(progPascal,list(sym("cons"), num(3),num(6))))
+      runProg(list(progPascal,list(sym("cons"), num(5),num(10))))
       //println(prog)
       //trace.foreach(println)
 
