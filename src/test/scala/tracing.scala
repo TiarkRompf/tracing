@@ -1034,6 +1034,28 @@ trait ProgramFactorial extends Program[Int,Int] {
   }
 }
 
+trait ProgramFactorialNoisy extends Program[Any,Int] {
+  override def id = "factorial-noisy"
+  def program(c: Lang): c.P[Any,Int] = {
+    import c._
+    def fac: Fun[Any,Int] = fun("fac") { a: Rep[Any] =>
+      val a1 = fst[Int](a)
+      val a2 = snd[Int](a)
+      val n = a1 + a2
+      if (n === 0) {
+        1
+      } else {
+        n * fac(if (a1===0) pair(a1, a2-1) else pair(a1-1, a2))
+      }
+    }
+    new P[Any,Int] {
+      def f = fac
+      def a = pair(2,2)
+      def b = 24
+    }
+  }
+}
+
 trait ProgramPascal extends Program[Any,Int] {
   override def id = "pascal"
   def program(c: Lang): c.P[Any,Int] = {
@@ -1159,6 +1181,13 @@ class TestProgramFactorial extends ProgramFactorialFunSuite {
   override def analyze = false
 }
 class AnalyzeProgramFactorial extends ProgramFactorialFunSuite {
+  override def analyze = true
+}
+abstract class ProgramFactorialNoisyFunSuite extends ProgramFunSuite[Any,Int] with ProgramFactorialNoisy
+class TestProgramFactorialNoisy extends ProgramFactorialNoisyFunSuite {
+  override def analyze = false
+}
+class AnalyzeProgramFactorialNoisy extends ProgramFactorialNoisyFunSuite {
   override def analyze = true
 }
 abstract class ProgramPascalFunSuite extends ProgramFunSuite[Any,Int] with ProgramPascal
