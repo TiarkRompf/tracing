@@ -1049,9 +1049,9 @@ trait ProgramFactorialNoisy extends Program[Any,Int] {
   def program(c: Lang): c.P[Any,Int] = {
     import c._
     def fac: Fun[Any,Int] = fun("fac") { a: Rep[Any] =>
-      val a1 = fst[Int](a)
-      val a2 = snd[Int](a)
-      val n = a1 + a2
+      def a1 = fst[Int](a)
+      def a2 = snd[Int](a)
+      def n = a1 + a2
       if (n === 0) {
         1
       } else {
@@ -1071,8 +1071,8 @@ trait ProgramPascal extends Program[Any,Int] {
   def program(c: Lang): c.P[Any,Int] = {
     import c._
     def pascal: Fun[Any,Int] = fun("pascal") { a: Rep[Any] =>
-      val c = fst[Int](a)
-      val r = snd[Int](a)
+      def c = fst[Int](a)
+      def r = snd[Int](a)
       if (c <= 0 || r <= c) 1
       else pascal(pair(c - 1, r - 1)) + pascal(pair(c, r - 1))
     }
