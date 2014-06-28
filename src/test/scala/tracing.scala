@@ -11,7 +11,7 @@ DONE:
 
 + 1 meta-layer (low-level interprets high-level)
 
-- n meta-layers (low-level interprets high-level, interprets high-level, ...)
++ n meta-layers (low-level interprets high-level, interprets high-level, ...)
 
 TODO:
 
