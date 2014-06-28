@@ -715,6 +715,7 @@ trait ProgEval extends LangX {
     ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
     ife(equs(sym("isNumber"), car(e)),isNumber(eval(car(cdr(e)),env)),
     ife(equs(sym("isSymbol"), car(e)),isSymbol(eval(car(cdr(e)),env)),
+    ife(equs(sym("sym"), car(e)),     car(cdr(e)),
     ife(equs(sym("equs"), car(e)),    equs(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("equi"), car(e)),    equi(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("ltei"), car(e)),    ltei(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
@@ -734,7 +735,7 @@ trait ProgEval extends LangX {
       //println("CAR(CDR(e)): "+car(cdr((e))))
                                          apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
     }
-    )))))))))))))))))))
+    ))))))))))))))))))))
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
@@ -891,6 +892,21 @@ trait Code2Data extends Lang {
 }
 
 trait Code2DataProgEval extends ProgEval with Code2Data {
+  // LangX stubs
+  def record(xs: (String,Rep[Any])*): Rep[Term] = ???
+  def field(x: Rep[Term], k: String): Rep[Term] = ???
+  def newArr[A](name: String): Rep[Unit] = ???
+  def getArr[A](name: String): Arr[A] = ???
+
+  // fun2 is sugar for curried function
+  type Fun2[A,B,C] = Fun[(A,B),C]
+  def fun2[A,B,C](name: String)(f: (Rep[A],Rep[B])=>Rep[C]): Fun2[A,B,C] = fun(name) { t: Rep[(A,B)] =>
+    f(car(t), cdr(t))
+  }
+  def fun2_apply[A,B,C](f:Fun2[A,B,C], a:Rep[A], b:Rep[B]): Rep[C] = fun_apply(f, cons(a,b))
+
+  override def sym(s: String): Term1 = List("sym", s)
+
   override def cons(x: Term1, y: Term1): Term1 = List("cons", x, y)
   override def car(x: Term1): Term1 = List("car", x)
   override def cdr(x: Term1): Term1 = List("cdr", x)
@@ -968,6 +984,19 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     runProg(list(sym(fn), data(p.a)), global_env(d.order, d.funs, d.deps))
     assert(out === ev(data(p.b)))
     if (analyze) report(id+"-high")
+  }
+  test(id+": double-interpretation") {
+    val di = new Code2DataProgEval {}
+    val en = di.eval
+    val d = new Code2Data {}
+    val p = program(d)
+    val fn = p.f
+    val i = new ProgEval with LangDirect
+/*
+    import i._
+    assert(eval(list(en, cons(list(fn, data(p.a)), global_env(d.order, d.funs, d.deps))), global_env(di.order, di.funs, di.deps)) ===
+           data(p.b))
+*/
   }
 }
 
