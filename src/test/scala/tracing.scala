@@ -744,15 +744,6 @@ trait ProgEval extends LangX {
 
   def list(xs: Term1*): Term1 = if (xs.isEmpty) nil else cons(xs.head, list(xs.tail:_*))
 
-  def or(x: Term1, y: Term1) = list("ife", x, num(1), y)
-  def dec(x: Term1): Term1 = list("minus", x, num(1))
-  def inc(x: Term1): Term1 = list("plus", x, num(1))
-  def begin(x: Term1, xs: Term1*): Term1 =
-    if (xs.isEmpty) x
-    else list(list("lambda", "_", "_", begin(xs.head, xs.tail:_*)), x)
-  def let(name: String, e1: Term1, e2: Term1): Term1 =
-    list(list("lambda", "_", name, e2), e1)
-
   // DONE #1: run in low-level interpreter
   //   - 1 level of interpretation
   //
@@ -768,9 +759,26 @@ trait ProgEval extends LangX {
     case x::xs => cons(data(x), data(xs))
   }
 
-  def global_env(order: List[String], funs: Map[String, Any], env: Term1 = nil): Term1 = order match {
+  def global_env(order: List[String], funs: Map[String, Any], deps: Map[String,List[String]], env: Term1 = nil): Term1 = order match {
     case Nil => env
-    case x::xs => global_env(xs, funs, cons(cons(x, cons(data(funs(x)), env)), env))
+    case x::xs =>
+      var f = funs(x)
+      deps.get(x) match {
+        case None =>
+        case Some(ds) =>
+          def let(name: String, e1: Any, e2: Any): Any =
+            List(List("lambda", "_", name, e2), e1)
+          def wrap1(d: String, b: Any): Any = {
+            let(d, funs(d), b)
+          }
+          val List("lambda", fn, fa, fr) = f
+          var b = fr
+          for (d <- ds) {
+            b = wrap1(d, b)
+          }
+          f = List("lambda", fn, fa, b)
+      }
+      global_env(xs, funs, deps, cons(cons(x, cons(data(f), env)), env))
   }
 }
 
@@ -815,6 +823,7 @@ trait Code2Data extends Lang {
   type Arr[A] = Any
   private var _order: List[String] = Nil
   private val _funs = mutable.Map[String,Any]()
+  private val _deps = mutable.Map[String,mutable.LinkedHashSet[String]]()
   var counter = 0
   def fresh_var[A]: String = {
     counter += 1
@@ -840,6 +849,17 @@ trait Code2Data extends Lang {
         _funs(name) = "TODO"
         val r = f(arg)
         _funs(name) = List("lambda", name, arg, r)
+      case Some("TODO") =>
+        val ds = _order.takeWhile(_ != name)
+        for (d <- ds; if _funs(d)=="TODO") {
+          _deps.get(name) match {
+            case None =>
+              _deps(name) = new mutable.LinkedHashSet()
+              _deps(name) += d
+            case Some(_) =>
+              _deps(name) += d
+          }
+        }
       case Some(_) =>
     }
     name
@@ -861,7 +881,13 @@ trait Code2Data extends Lang {
   override def snd[A](t: Rep[Any]): Rep[A] = List("cdr", t)
 
   def funs: Map[String,Any] = _funs.toMap
-  def order: List[String] = _order
+  def order: List[String] = _order filter {name =>
+    val ds = _order dropWhile (_ != name)
+    (for (d <- ds;
+          s <- deps.get(d);
+          if s contains name) yield d).isEmpty
+  }
+  def deps: Map[String,List[String]] = (for ((k,v) <- _deps) yield (k,v.toList)).toMap
 }
 
 trait Code2DataProgEval extends ProgEval with Code2Data {
@@ -930,7 +956,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val fn = p.f
     val i = new ProgEval with LangDirect
     import i._
-    assert(eval(list(fn, data(p.a)), global_env(d.order, d.funs)) === data(p.b))
+    assert(eval(list(fn, data(p.a)), global_env(d.order, d.funs, d.deps)) === data(p.b))
   }
 
   test(id+": execute in high-level interpreter, which is mapped to low-level code, which is interpreted") {
@@ -939,7 +965,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val fn = p.f
     val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze
     import i._
-    runProg(list(sym(fn), data(p.a)), global_env(d.order, d.funs))
+    runProg(list(sym(fn), data(p.a)), global_env(d.order, d.funs, d.deps))
     assert(out === ev(data(p.b)))
     if (analyze) report(id+"-high")
   }
@@ -1062,6 +1088,28 @@ trait ProgramSieve extends Program[Int,Int] { z =>
   }
 }
 
+trait ProgramEven extends Program[Int,Int] { z =>
+  override def id = "even"
+  def a: Int
+  def b: Int
+  def program(c: Lang): c.P[Int,Int] = {
+    import c._
+    def even: Fun[Int,Int] = fun("even") {i: Rep[Int] =>
+      if (i === 0) 1
+      else odd(i-1)
+    }
+    def odd: Fun[Int,Int] = fun("odd") {i: Rep[Int] =>
+      if (i === 0) 0
+      else even(i-1)
+    }
+    new P[Int,Int] {
+      def f = even
+      def a = z.a
+      def b = z.b
+    }
+  }
+}
+
 abstract class ProgramFactorialFunSuite extends ProgramFunSuite[Int,Int] with ProgramFactorial
 class TestProgramFactorial extends ProgramFactorialFunSuite {
   override def analyze = false
@@ -1111,5 +1159,28 @@ class TestProgramSieveNeg extends ProgramSieveNegFunSuite {
   override def analyze = false
 }
 class AnalyzeProgramSieveNeg extends ProgramSieveNegFunSuite {
+  override def analyze = true
+}
+abstract class ProgramEvenFunSuite extends ProgramFunSuite[Int,Int] with ProgramEven
+abstract class ProgramEvenPosFunSuite extends ProgramEvenFunSuite {
+  override def id = super.id+"-pos"
+  override def a = 4
+  override def b = 1
+}
+abstract class ProgramEvenNegFunSuite extends ProgramEvenFunSuite {
+  override def id = super.id+"-neg"
+  override def a = 7
+  override def b = 0
+}
+class TestProgramEvenPos extends ProgramEvenPosFunSuite {
+  override def analyze = false
+}
+class AnalyzeProgramEvenPos extends ProgramEvenPosFunSuite {
+  override def analyze = true
+}
+class TestProgramEvenNeg extends ProgramEvenNegFunSuite {
+  override def analyze = false
+}
+class AnalyzeProgramEvenNeg extends ProgramEvenNegFunSuite {
   override def analyze = true
 }
