@@ -927,7 +927,7 @@ trait Code2DataProgEval extends ProgEval with Code2Data {
   override def my_arr_new: Term1 = List("my_arr_new")
   override def my_arr: Term1 = List("my_arr")
   override def arr_get(a: Term1, i: Term1): Term1 = List("arr_get", a, i)
-  override def arr_put(a: Term1, i: Term1, v: Term1): Term1 = List("arr_update", a, i, v)
+  override def arr_put(a: Term1, i: Term1, v: Term1): Term1 = List("arr_put", a, i, v)
 }
 
 /* ---------- PART 6: tests ---------- */
