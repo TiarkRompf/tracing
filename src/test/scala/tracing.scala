@@ -719,9 +719,10 @@ trait Analyze extends RunLowLevel {
         def pred0(x: Int) = pred.getOrElse(x,Seq())
         def succ0(x: Int) = succ.getOrElse(x,Seq())
 
+        val loopThresh = 3
         //val isoNodes = hotspots collect { case (h,f) if pred0(h) forall (p => succ(p).size == 1) => h }
         //val isoEdges = hotedges collect { case ((a,b),f) if isoNodes contains b => (a,b) } // only edge
-        val isoNodes = hotspots collect { case (h,f) if !(succ0(h) contains h) || maxloopcount(h) < 3 => h }
+        val isoNodes = hotspots collect { case (h,f) if !(succ0(h) contains h) || maxloopcount(h) <= loopThresh => h }
         val isoEdges = hotedges collect { case ((a,b),f) if succ(a).size == 1 && (isoNodes contains b) => (a,b) } // specific transfer
 
         printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(isoEdges)
@@ -741,15 +742,6 @@ trait Analyze extends RunLowLevel {
       */
 
       def variant1(): Unit = {
-        // unroll small loops -- may or may not want to do this
-        /*for ((h,f) <- hotspots if succ contains h) {
-          if ((succ(h) contains h) && maxloopcount(h) <= 3) {
-            println(s" -----> unroll $h,$h")
-            merge(List(h,h))
-            return analyze(step + 1)
-          }
-        }*/
-
         val max = hotspots.length
         for (deg   <- max to 0 by -1; // outdegree
              (h,f) <- hotspots if pred contains h) {
@@ -777,6 +769,20 @@ trait Analyze extends RunLowLevel {
         }
       }
 
+      // unroll small loops -- may or may not want to do this
+      def unrollSmallLoops(): Unit = {
+        for ((h,f) <- hotspots if succ contains h) {
+          if ((succ(h) contains h) && maxloopcount(h) <= 3) {
+            println(s" -----> unroll $h,$h")
+            merge(List(h,h))
+            printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(List((h,h)))
+            continueAnalyze()
+          }
+        }
+      }
+
+
+      //unrollSmallLoops()
       variant2()
 
       // print final graph
@@ -1171,8 +1177,8 @@ trait ProgramFactorial extends Program[Int,Int] {
     }
     new P[Int,Int] {
       def f = fac
-      def a = 4
-      def b = 24
+      def a = 10//4
+      def b = 3628800//24
     }
   }
 }
