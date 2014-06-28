@@ -519,6 +519,8 @@ trait RunLowLevel extends LangLowLevel {
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
 
 trait Analyze extends RunLowLevel {
+  val verbose = false
+
   def report(s1:String) = {
     val traceB = this.trace
 
@@ -528,10 +530,10 @@ trait Analyze extends RunLowLevel {
     }
 
     // map blocks in trace to numeric indexes
-    println("block <-> index:")
+    if (verbose) println("block <-> index:")
     val indexToBlock = traceB.distinct.toArray
     val blockToIndex = indexToBlock.zipWithIndex.toMap
-    println(blockToIndex)
+    if (verbose) println(blockToIndex)
 
     var trace = traceB map blockToIndex
     // merge nodes
@@ -545,7 +547,7 @@ trait Analyze extends RunLowLevel {
       //println(str0)
       //println(str1)
       trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
-      println(trace)
+      if (verbose) println(trace)
     }
 
     // export graph viz
@@ -597,10 +599,12 @@ trait Analyze extends RunLowLevel {
 
       val hottest = hotspots.head
 
-      println("hottest")
-      println(hottest)
-      println(indexToBlock(hottest._1) + " -> " + hottest._2)
-      println()
+      if (verbose) {
+        println("hottest")
+        println(hottest)
+        println(indexToBlock(hottest._1) + " -> " + hottest._2)
+        println()
+      }
 
       // compute hot edges
       val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
@@ -612,10 +616,12 @@ trait Analyze extends RunLowLevel {
       printGraph("%03d".format(step))(freq,edgefreq)
 
       val hottestEdge = hotedges.head
-      println("hottest")
-      println(hottestEdge)
-      //println(indexToBlock(hottest._1) + " -> " + hottest._2)
-      println()
+      if (verbose) {
+        println("hottest")
+        println(hottestEdge)
+        //println(indexToBlock(hottest._1) + " -> " + hottest._2)
+        println()
+      }
 
       // compute pred/succ sets, specificity
 
@@ -651,8 +657,10 @@ trait Analyze extends RunLowLevel {
     try {
       analyze(0)
       println()
-      println("merge history:")
-      mergeHist.filter(_.length > 1).foreach(println)
+      if (verbose) {
+        println("merge history:")
+        mergeHist.filter(_.length > 1).foreach(println)
+      }
     } finally {
       // join all pdfs
       import scala.sys.process._
