@@ -693,6 +693,7 @@ trait ProgEval extends LangX {
   def isSymbol(x: Term1): Term1 = if (str_equ(tagOf(x), lift("sym"))) num(1) else num(0)
 
   def lookup: Fun2[Term,Term,Term] = fun2("lookup") { (x,env) =>
+    //println("LOOKUP:"+x+":"+env)
     ife(equs(x, car(car(env))), cdr(car(env)),
         lookup(x,cdr(env)))
   }
@@ -713,9 +714,10 @@ trait ProgEval extends LangX {
     ife(isSymbol(e),                  lookup(e,env),
     ife(equs(sym("lambda"), car(e)),       cons(e,env),
     ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
+    ife(equs(sym("sym"), car(e)),     car(cdr(e)),
+    ife(equs(sym("quote"), car(e)),   car(cdr(e)),
     ife(equs(sym("isNumber"), car(e)),isNumber(eval(car(cdr(e)),env)),
     ife(equs(sym("isSymbol"), car(e)),isSymbol(eval(car(cdr(e)),env)),
-    ife(equs(sym("sym"), car(e)),     car(cdr(e)),
     ife(equs(sym("equs"), car(e)),    equs(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("equi"), car(e)),    equi(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
     ife(equs(sym("ltei"), car(e)),    ltei(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
@@ -735,7 +737,7 @@ trait ProgEval extends LangX {
       //println("CAR(CDR(e)): "+car(cdr((e))))
                                          apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
     }
-    ))))))))))))))))))))
+    )))))))))))))))))))))
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
@@ -937,7 +939,6 @@ trait Program[A,B] {
 import org.scalatest.FunSuite
 trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
   def analyze: Boolean
-
   test(id+": direct execution") {
     val c = new LangDirect {}
     val p = program(c)
@@ -985,18 +986,33 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     assert(out === ev(data(p.b)))
     if (analyze) report(id+"-high")
   }
-  test(id+": double-interpretation") {
+
+  test(id+": double-interpretation, direct") {
     val di = new Code2DataProgEval {}
     val en = di.eval
+
     val d = new Code2Data {}
     val p = program(d)
     val fn = p.f
+
     val i = new ProgEval with LangDirect
-/*
     import i._
-    assert(eval(list(en, cons(list(fn, data(p.a)), global_env(d.order, d.funs, d.deps))), global_env(di.order, di.funs, di.deps)) ===
-           data(p.b))
-*/
+    assert(eval(list(en, list("cons", list("quote", list(fn, data(p.a))), list("quote", global_env(d.order, d.funs, d.deps)))), global_env(di.order, di.funs, di.deps)) === data(p.b))
+  }
+
+  test(id+": double-interpretation, low-level") {
+    val di = new Code2DataProgEval {}
+    val en = di.eval
+
+    val d = new Code2Data {}
+    val p = program(d)
+    val fn = p.f
+
+    val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze
+    import i._
+    runProg(list(sym(en), list(sym("cons"), list(sym("quote"), list(sym(fn), data(p.a))), list(sym("quote"), global_env(d.order, d.funs, d.deps)))), global_env(di.order, di.funs, di.deps))
+    assert(out === ev(data(p.b)))
+    if (analyze) report(id+"-high2")
   }
 }
 
