@@ -900,7 +900,6 @@ trait Code2DataProgEval extends ProgEval with Code2Data {
   def newArr[A](name: String): Rep[Unit] = ???
   def getArr[A](name: String): Arr[A] = ???
 
-  // fun2 is sugar for curried function
   type Fun2[A,B,C] = Fun[(A,B),C]
   def fun2[A,B,C](name: String)(f: (Rep[A],Rep[B])=>Rep[C]): Fun2[A,B,C] = fun(name) { t: Rep[(A,B)] =>
     f(car(t), cdr(t))
