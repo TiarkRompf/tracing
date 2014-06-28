@@ -7,11 +7,13 @@ import scala.collection._
 
 /*
 
-TODO:
+DONE:
 
 + 1 meta-layer (low-level interprets high-level)
 
 - n meta-layers (low-level interprets high-level, interprets high-level, ...)
+
+TODO:
 
 - proper profiling
 
@@ -750,7 +752,7 @@ trait ProgEval extends LangX {
   // DONE #1: run in low-level interpreter
   //   - 1 level of interpretation
   //
-  // TODO #2: meta-interpreter
+  // DONE #2: meta-interpreter
   //   - 2 levels of interpretation
 
   def data(x: Any): Term1 = x match {
