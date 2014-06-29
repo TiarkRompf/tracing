@@ -134,6 +134,7 @@ trait Eval extends Syntax with Print {
 
   def exec(name: Label): Unit = try {
     trace = trace :+ name
+    //println("0: "+name)
     exec(prog(name))
   } catch {
     case ex =>
@@ -147,6 +148,7 @@ trait Eval extends Syntax with Print {
       case TrampoDone =>
       case TrampoLabel(name) =>
         trace = trace :+ name
+        //println("0: "+name)
         exec(prog(name))
       case TrampoBlock(block) =>
         exec(block)
@@ -274,6 +276,8 @@ trait Lang {
 trait LangX extends Lang {
   type Term
 
+  def iprint(n:Int, x: Rep[Any]): Rep[Unit]
+
   def newArr[A](name: String): Rep[Unit]
   def getArr[A](name: String): Arr[A]
   override def newMyArr[A]: Rep[Unit] = newArr[A]("my_only_array")
@@ -300,6 +304,8 @@ trait LangDirect extends LangX {
   type Val[+T] = Rep[T]
 
   case class Rep[+T](x:T)
+
+  def iprint(n: Int, x: Rep[Any]) = println(s"$n: " + x.x)
 
   var arrays = mutable.Map[String,Arr[_]]()
   type Arr[A] = Rep[mutable.Map[Int,A]]
@@ -351,6 +357,10 @@ trait LangLowLevel extends LangX with LowLevel {
   type Term = Any
   type Val[+T] = Exp
   type Rep[+T] = Exp
+
+  def iprint(n: Int, x: Rep[Any]) = {
+    stms = stms :+ Print(x) // FIXME: level
+  }
 
   type Arr[A] = Exp
   def newArr[A](name: String) = {
@@ -521,7 +531,74 @@ trait RunLowLevel extends LangLowLevel {
 trait Analyze extends RunLowLevel {
   val verbose = false
 
+  class GraphPrinter(s1: String) {
+    // export graph viz
+    val dir = new File(s"graphs-$s1")
+    dir.mkdirs
+    dir.listFiles.foreach(_.delete)
+    val combinedPdf = new File(s"graphs-all-$s1.pdf")
+    if (combinedPdf.exists) combinedPdf.delete
+
+    def printGraph(s2:String)(mergeHist: Int=>Seq[Int],maxloopcount:Int=>Int, freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
+      val out = new PrintStream(new File(dir,s"g$s2.dot"))
+      out.println("digraph G {")
+      //out.println("rankdir=LR")
+
+      /*out.println("""struct1 [shape=plaintext label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"><TR><TD>""")
+      out.println("foo1<BR/>")
+      out.println("foo2<BR/>")
+      out.println("foo3<BR/>")
+      out.println("""</TD></TR></TABLE>>];""")*/
+
+      val fmax = freq.values.max
+      val pmax = 15
+      def scale(f: Double) = if (fmax <= pmax) f else f/fmax * pmax
+      val nodes = (edges.map(_._1)) //++ edges.map(_._2)).distinct
+      for ((a,f) <- freq) {
+        val fw = scale(f)
+        val size = mergeHist(a).length
+        val color = if (nodes contains a) "red" else "black"
+        out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" color="$color" penwidth="${fw}" shape=box]""")
+      }
+      for (((a,b),f) <- edgefreq) {
+        val fw = scale(f)
+        val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
+        val color = if (edges contains (a,b)) "red" else "black"
+        out.println(s"""L$a -> L$b [label=\" $f $extra\" weight="$f" color="$color" penwidth="${fw}"]""")
+      }
+      /* draw edge hop frequences:  a -> ? -> b
+      for (((a,b),f) <- edgehopfreq) {
+        val fw = 0.5
+        val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
+        val color = "green"
+        out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="0" color="$color" penwidth="${fw}"]""")
+      }*/    
+      out.println("}")
+      out.close()
+      import scala.sys.process._
+      s"dot -Tpdf -O $dir/g$s2.dot".!
+    }
+
+    def finish() = {
+      // join all pdfs
+      import scala.sys.process._
+      (s"./pdfjoin.sh -o $combinedPdf " + 
+        dir.listFiles.filter(_.getName.endsWith(".pdf")).mkString(" ")).!!
+    }
+  }
+
+
   def report(s1:String) = {
+    // note: both steps can be run independently or together.
+    val tr1 = analyzeDeterministicJumps(s1+"A")
+    this.trace = tr1.map(_.toString)
+    val tr2 = analyzeTraceHierarchies(s1+"B")
+  }
+
+
+
+  // first version: inline deterministic jumps
+  def analyzeDeterministicJumps(s1:String): Vector[Int] = {
     val traceB = this.trace
 
     implicit class MySeqOps[T](xs: Seq[T]) {
@@ -576,51 +653,7 @@ trait Analyze extends RunLowLevel {
     }
 
     // export graph viz
-    val dir = new File(s"graphs-$s1")
-    dir.mkdirs
-    dir.listFiles.foreach(_.delete)
-    val combinedPdf = new File(s"graphs-all-$s1.pdf")
-    if (combinedPdf.exists) combinedPdf.delete
-
-    def printGraph(s2:String)(freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
-      val out = new PrintStream(new File(dir,s"g$s2.dot"))
-      out.println("digraph G {")
-      //out.println("rankdir=LR")
-
-      /*out.println("""struct1 [shape=plaintext label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"><TR><TD>""")
-      out.println("foo1<BR/>")
-      out.println("foo2<BR/>")
-      out.println("foo3<BR/>")
-      out.println("""</TD></TR></TABLE>>];""")*/
-
-      val fmax = freq.values.max
-      val pmax = 15
-      def scale(f: Double) = if (fmax <= pmax) f else f/fmax * pmax
-      val nodes = (edges.map(_._1)) //++ edges.map(_._2)).distinct
-      for ((a,f) <- freq) {
-        val fw = scale(f)
-        val size = mergeHist(a).length
-        val color = if (nodes contains a) "red" else "black"
-        out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" color="$color" penwidth="${fw}" shape=box]""")
-      }
-      for (((a,b),f) <- edgefreq) {
-        val fw = scale(f)
-        val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
-        val color = if (edges contains (a,b)) "red" else "black"
-        out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="$f" color="$color" penwidth="${fw}"]""")
-      }
-      /* draw edge hop frequences:  a -> ? -> b
-      for (((a,b),f) <- edgehopfreq) {
-        val fw = 0.5
-        val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
-        val color = "green"
-        out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="0" color="$color" penwidth="${fw}"]""")
-      }*/    
-      out.println("}")
-      out.close()
-      import scala.sys.process._
-      s"dot -Tpdf -O $dir/g$s2.dot".!
-    }
+    val gg = new GraphPrinter(s1)
 
     // perform one step of analysis/transformation
     def analyze(step: Int): Unit = {
@@ -725,7 +758,7 @@ trait Analyze extends RunLowLevel {
         val isoNodes = hotspots collect { case (h,f) if !(succ0(h) contains h) || maxloopcount(h) <= loopThresh => h }
         val isoEdges = hotedges collect { case ((a,b),f) if succ(a).size == 1 && (isoNodes contains b) => (a,b) } // specific transfer
 
-        printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(isoEdges)
+        gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(isoEdges)
 
         val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
 
@@ -763,7 +796,7 @@ trait Analyze extends RunLowLevel {
           }
           if (hit.nonEmpty) {
             println(hit)
-            printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(hit)
+            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(hit)
             continueAnalyze()
           }
         }
@@ -775,7 +808,7 @@ trait Analyze extends RunLowLevel {
           if ((succ(h) contains h) && maxloopcount(h) <= 3) {
             println(s" -----> unroll $h,$h")
             merge(List(h,h))
-            printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(List((h,h)))
+            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(List((h,h)))
             continueAnalyze()
           }
         }
@@ -786,7 +819,7 @@ trait Analyze extends RunLowLevel {
       variant2()
 
       // print final graph
-      printGraph("%03d".format(step))(freq,edgefreq,edgehopfreq)(Nil)
+      gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(Nil)
     }
 
     try {
@@ -799,14 +832,196 @@ trait Analyze extends RunLowLevel {
         println("final trace:")
         println(trace)
       }
+      trace
     } finally {
-      // join all pdfs
-      import scala.sys.process._
-      (s"./pdfjoin.sh -o $combinedPdf " + 
-        dir.listFiles.filter(_.getName.endsWith(".pdf")).mkString(" ")).!!
+      gg.finish()
+    }
+  }
+
+
+  def analyzeTraceHierarchies(s1:String): Vector[Int] = {
+    val traceB = this.trace
+
+    implicit class MySeqOps[T](xs: Seq[T]) {
+      def collectBy[K,V](f1: T => K, f2: Seq[T] => V): Map[K,V] =
+        xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
     }
 
+    // map blocks in trace to numeric indexes
+    if (verbose) println("block <-> index:")
+    val indexToBlock = traceB.distinct.toArray
+    val blockToIndex = indexToBlock.zipWithIndex.toMap
+    if (verbose) println(blockToIndex)
+
+    var trace = traceB map blockToIndex
+
+    // merge nodes
+    var count = indexToBlock.length
+    val mergeHist = new Array[Vector[Int]](10000)
+    for (i <- 0 until mergeHist.length)
+      mergeHist(i) = Vector(i)
+
+    def merge(xs: List[Int]) = {
+      val List(a,b) = xs
+      mergeHist(a) = mergeHist(a) ++ mergeHist(b)
+      val str0 = trace.mkString(";",";;",";")
+      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;")
+      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      // if (verbose) println(trace)
+    }
+    def dup(xs: List[Int]) = {
+      val List(a,b) = xs
+      val c = count
+      count += 1
+      mergeHist(c) = mergeHist(b)
+      val str0 = trace.mkString(";",";;",";")
+      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;;$c;")
+      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      //println(trace)
+    }
+
+    // find max iteration count
+    def maxloopcount(a: Int): Int = {
+      var k = 0
+      val str0 = trace.mkString(";",";;",";")
+      var search = s";$a;"
+      while (true) {
+        if (!str0.contains(search)) return k
+        k += 1
+        search = search + s";$a;"
+      }
+      k
+    }
+
+    val gg = new GraphPrinter(s1)
+
+    def splitWhere[T](xs0: Seq[T])(f: T => Boolean): List[Seq[T]] = { 
+      val buf = new scala.collection.mutable.ListBuffer[Seq[T]]
+      var xs = xs0
+      while (true) {
+        val i = xs.indexWhere(f) 
+        if (i < 0) {
+          buf += xs
+          return buf.result
+        } else { 
+          val (h,t) = xs.splitAt(i+1)
+          buf += h
+          xs = t
+        } 
+      }
+      throw new Exception
+    }
+    assert(splitWhere(List(1,2,3,4,5,6,7,8,9))(_ % 4 == 0) == 
+      List(List(1, 2, 3, 4), List(5, 6, 7, 8), List(9)))
+
+    // perform one step of analysis/transformation
+    def analyze(step: Int): Vector[Int] = {
+      if (step > 30) {
+        println("ABORT")
+        return trace
+      }
+      println(s"/* analysis pass $step */")
+
+      // compute frequencies, sort to find hotspots
+      val freq = trace.collectBy(x=>x, _.length)
+      println("hotspots:")
+      val hotspots = freq.toSeq.sortBy(-_._2)
+      hotspots.take(10).foreach(println)
+      println
+
+      val hottest = hotspots.head
+      //if (verbose) {
+        println("hottest")
+        println(hottest)
+        println(indexToBlock(hottest._1) + " -> " + hottest._2)
+        println()
+      //}
+
+      // compute hot edges / node pairs
+      val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
+      println("hot edges:")
+      val hotedges = edgefreq.toSeq.sortBy(-_._2)
+      hotedges.take(10).foreach(println)
+      println()
+
+      val hottestEdge = hotedges.head
+      //if (verbose) {
+        println("hottest")
+        println(hottestEdge)
+        //println(indexToBlock(hottest._1) + " -> " + hottest._2)
+        println()
+      //}
+      
+      // calc pred and succ
+      val pred = (trace zip trace.drop(1)) collectBy(_._2, _.map(_._1).distinct);
+      val succ = (trace zip trace.drop(1)) collectBy(_._1, _.map(_._2).distinct);
+
+
+      /* main analysis part follows:
+
+         Find the `pivot` node: the most frequent one which is not already a self-loop.
+         Identify all traces from pivot to pivot.
+         This set of traces corresponds to a trace tree (Franz/Gal), but we don't stop here.
+         Collapse each trace into a single block:
+              ... A B A C D A B A E F A B A C D A B A ...
+                        becomes with pivot A:
+              ... A [BA] [CDA] [BA] [EFA] [BA] [CDA] [BA] ...
+         We continue the process. [BA] will be the new pivot, and we group:
+              ... A [BA] [[CDA][BA]] [[EFA][BA]] [[CDA][BA]] ...
+         Next iteration will group:
+              ... A [BA] [CDABAEFABA] [CDABAEFABA] ...
+         And now we stop, having reached a self-loop.
+      */
+
+      def isLoop(a: Int) = succ.getOrElse(a,Seq()) contains a
+      val hotspotsNoLoop = hotspots.map(_._1).filterNot(isLoop)
+      val pivot = hotspotsNoLoop.takeWhile(a=>freq(a) == freq(hotspotsNoLoop.head)).last
+
+      if (freq(pivot) == 1) { // done, only loops remain
+        gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount,freq,edgefreq,Map.empty)(Nil)
+        return trace
+      }
+
+      gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount,freq,edgefreq,Map.empty)(List((pivot,pivot)))
+
+      val ignoreHeadAndTail = true
+
+      val traces0 = splitWhere(trace)(_ == pivot)
+      val traces = if (ignoreHeadAndTail)
+          traces0.head.map(List(_)) ++ traces0.tail.init ++ traces0.last.map(List(_))
+        else
+          traces0
+      val hottraces = traces.groupBy(x=>x).map{case(k,v)=>(k,v.length)}.toSeq.sortBy(-_._2)
+
+      println
+      println("5 hot traces")
+      //hottraces.take(5).foreach{case(t,c)=>println("---"+c);t.foreach(println)}
+      hottraces.take(10).foreach(p=>println(p._2+"*"+p._1.mkString(" ")))
+
+      // build a trace of traces ...
+
+      println("block <-> index:")
+      val indexToBlock2 = traces.distinct.toArray
+      val blockToIndex2 = indexToBlock2.zipWithIndex.toMap
+      println(blockToIndex2)
+
+      trace = (traces map blockToIndex2).toVector
+
+      println
+      println("trace")
+      println(trace)
+
+      analyze(step+1)
+
+    }
+
+    try {
+      analyze(0)
+    } finally {
+      gg.finish()
+    }
   }
+
 }
 
 /* ---------- PART 4: high-level term interpreter ---------- */
@@ -857,11 +1072,13 @@ trait ProgEval extends LangX {
     //println("ARR_PUT:"+a+":"+i+":"+v)
     arr_update(toArr(a), toInt(i), v); num(0)
   }
+  def eprint(n: Int, x: Term1): Term1 = { /*iprint(n,x);*/ num(0) }
 
   def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) =>
+    begin(eprint(1,e),
     ife(isNumber(e),                  e,
     ife(isSymbol(e),                  lookup(e,env),
-    ife(equs(sym("lambda"), car(e)),       cons(e,env),
+    ife(equs(sym("lambda"), car(e)),  cons(e,env),
     ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
     ife(equs(sym("sym"), car(e)),     car(cdr(e)),
     ife(equs(sym("quote"), car(e)),   car(cdr(e)),
@@ -880,18 +1097,20 @@ trait ProgEval extends LangX {
     ife(equs(sym("my_arr"), car(e)),     my_arr,
     ife(equs(sym("arr_get"), car(e)),    arr_get(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env)),
     ife(equs(sym("arr_put"), car(e)),    arr_put(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env), eval(car(cdr(cdr(cdr(e)))), env)),
+    ife(equs(sym("eprint"), car(e)),     eprint(1,eval(car(cdr(e)),env)),
     {
       //println("EXP: "+e)
       //println("CAR(e): "+car(e))
       //println("CAR(CDR(e)): "+car(cdr((e))))
                                          apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
     }
-    )))))))))))))))))))))
+    )))))))))))))))))))))))
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
     //println(s"apply $f @ $x")
-    eval(car(cdr(cdr(cdr(car(f))))), cons(cons(car(cdr(cdr(car(f)))), x), cons(cons(car(cdr(car(f))), f), cdr(f))))
+    begin(eprint(1,car(cdr(car(f)))),
+    eval(car(cdr(cdr(cdr(car(f))))), cons(cons(car(cdr(cdr(car(f)))), x), cons(cons(car(cdr(car(f))), f), cdr(f)))))
   }
 
   def list(xs: Term1*): Term1 = if (xs.isEmpty) nil else cons(xs.head, list(xs.tail:_*))
@@ -1044,6 +1263,7 @@ trait Code2Data extends Lang {
 
 trait Code2DataProgEval extends ProgEval with Code2Data {
   // LangX stubs
+  def iprint(n: Int, x: Rep[Any]): Rep[Unit] = ???
   def record(xs: (String,Rep[Any])*): Rep[Term] = ???
   def field(x: Rep[Term], k: String): Rep[Term] = ???
   def newArr[A](name: String): Rep[Unit] = ???
@@ -1076,6 +1296,7 @@ trait Code2DataProgEval extends ProgEval with Code2Data {
   override def my_arr: Term1 = List("my_arr")
   override def arr_get(a: Term1, i: Term1): Term1 = List("arr_get", a, i)
   override def arr_put(a: Term1, i: Term1, v: Term1): Term1 = List("arr_put", a, i, v)
+  override def eprint(n: Int, x: Term1): Term1 = List("eprint", x) // FIXME: ident
 }
 
 /* ---------- PART 6: tests ---------- */
