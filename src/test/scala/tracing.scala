@@ -44,7 +44,7 @@ trait Syntax {
   abstract class Stm
   case class New(a: Exp, b: Exp) extends Stm  // a[b] := new
   case class Put(a: Exp, b: Exp, c: Exp) extends Stm  // a[b] := c
-  case class Print(a: Exp) extends Stm
+  case class Print(a: Exp*) extends Stm
   case class Output(a: Exp) extends Stm
 
   abstract class Exp
@@ -95,7 +95,33 @@ trait Print extends Syntax {
 }
 
 
-trait Eval extends Syntax with Print {
+trait Runtime {
+  def objToString(x: Any): String = x match {
+      case x: Seq[Any] => x.map(objToString).mkString
+      case x: Map[String,Any] =>
+        objToString(x("tag")) match {
+          case "pair" =>
+            "(" + objToString(x("car")) + objToStringTail(x("cdr")) + ")"
+          case "nil" => "()"
+          case _ =>
+            objToString(x("val"))
+        }
+      case x => x.toString
+  }
+  def objToStringTail(x: Any): String = x match {
+    case x: Map[String,Any] =>
+      objToString(x("tag")) match {
+        case "pair" =>
+          " " + objToString(x("car")) + objToStringTail(x("cdr"))
+        case "nil" => ""
+        case _ =>
+          " . " + objToString(x("val"))
+      }
+    case _ => " . " + x.toString
+  }
+}
+
+trait Eval extends Syntax with Print with Runtime {
   type Label = String
   type Obj = mutable.Map[Any,Any]
 
@@ -165,7 +191,7 @@ trait Eval extends Syntax with Print {
       else TrampoLabel(x1)
   }
   def exec(stm: Stm): Unit = { /*println(stm);*/ stm } match {
-    case Print(a) => println(eval[Any](a))
+    case Print(as @ _*) => println(as.map(a=>eval[Any](a)).map(objToString).mkString)
     case Output(a) => output(eval[Any](a))
     case Put(a,b,c) => (eval[Obj](a))(eval[Any](b)) = eval[Any](c)
     case New(a,b) => (eval[Obj](a))(eval[Any](b)) = new mutable.HashMap
@@ -300,12 +326,21 @@ trait LangX extends Lang {
 
 // direct execution
 
-trait LangDirect extends LangX {
+trait LangDirect extends LangX with Runtime {
   type Val[+T] = Rep[T]
 
   case class Rep[+T](x:T)
 
-  def iprint(n: Int, x: Rep[Any]) = println(s"$n: " + x.x)
+  override def objToString(x:Any): String = x match {
+    case Rep(x) => objToString(x)
+    case _ => super.objToString(x)
+  }
+  override def objToStringTail(x:Any): String = x match {
+    case Rep(x) => objToStringTail(x)
+    case _ => super.objToStringTail(x)
+  }
+
+  def iprint(n: Int, x: Rep[Any]) = println(objToString(x.x))
 
   var arrays = mutable.Map[String,Arr[_]]()
   type Arr[A] = Rep[mutable.Map[Int,A]]
@@ -359,7 +394,7 @@ trait LangLowLevel extends LangX with LowLevel {
   type Rep[+T] = Exp
 
   def iprint(n: Int, x: Rep[Any]) = {
-    stms = stms :+ Print(x) // FIXME: level
+    stms = stms :+ Print("--",x) // FIXME: level
   }
 
   type Arr[A] = Exp
@@ -385,7 +420,7 @@ trait LangLowLevel extends LangX with LowLevel {
 
   def fun_apply[A,B](f:Fun[A,B],x:Val[A]) = {
     val uname = label+"-"+f.name
-    val ucont = uname
+    val ucont = uname+"-ret"
     val ures  = uname
 
     val sd = Get(Mem,"sd")
@@ -450,7 +485,7 @@ trait LangLowLevel extends LangX with LowLevel {
     val uname = label+"-if"
     val uthen = uname+"t"
     val uelse = uname+"e"
-    val ucont = uname
+    val ucont = uname+"j"
     val ures  = uname
 
     prog(label) = Block(stms, IfElse(c,Goto(uthen),Goto(uelse)))
@@ -1081,45 +1116,53 @@ trait ProgEval extends LangX {
     //println("ARR_PUT:"+a+":"+i+":"+v)
     arr_update(toArr(a), toInt(i), v); num(0)
   }
-  def eprint(n: Int, x: Term1): Term1 = { /*iprint(n,x);*/ num(0) }
+  def eprint(x: Term1): Term1 = { iprint(1,cons("--", x)); num(0) }
 
-  def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,env) =>
-    begin(eprint(1,e),
+  def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,senv) =>
+    val env = car(senv)
+    val ctx = cdr(senv)
+    def cenv(s: String) = cons(env,cons(s,ctx))
+    begin(eprint(ctx),
     ife(isNumber(e),                  e,
     ife(isSymbol(e),                  lookup(e,env),
-    ife(equs(sym("lambda"), car(e)),  cons(e,env),
-    ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env), eval(car(cdr(cdr(cdr(e)))),env)),
+    ife(equs(sym("lambda"), car(e)),  cons(e,cenv("lam")),
+    ife(equs(sym("ife"), car(e)),     ife(eval(car(cdr(e)),cenv("ifc")), eval(car(cdr(cdr(e))),cenv("ift")), eval(car(cdr(cdr(cdr(e)))),cenv("ife"))),
     ife(equs(sym("sym"), car(e)),     car(cdr(e)),
     ife(equs(sym("quote"), car(e)),   car(cdr(e)),
-    ife(equs(sym("isNumber"), car(e)),isNumber(eval(car(cdr(e)),env)),
-    ife(equs(sym("isSymbol"), car(e)),isSymbol(eval(car(cdr(e)),env)),
-    ife(equs(sym("equs"), car(e)),    equs(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equs(sym("equi"), car(e)),    equi(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equs(sym("ltei"), car(e)),    ltei(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equs(sym("plus"), car(e)),    plus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equs(sym("minus"), car(e)),   minus(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equs(sym("times"), car(e)),   times(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))),env)),
-    ife(equs(sym("cons"), car(e)),    cons(eval(car(cdr(e)), env), eval(car(cdr(cdr(e))),env)),
-    ife(equs(sym("car"), car(e)),     car(eval(car(cdr(e)),env)),
-    ife(equs(sym("cdr"), car(e)),     cdr(eval(car(cdr(e)),env)),
+    ife(equs(sym("isNumber"), car(e)),isNumber(eval(car(cdr(e)),cenv("11"))),
+    ife(equs(sym("isSymbol"), car(e)),isSymbol(eval(car(cdr(e)),cenv("11"))),
+    ife(equs(sym("equs"), car(e)),    equs(eval(car(cdr(e)),cenv("12")), eval(car(cdr(cdr(e))),cenv("22"))),
+    ife(equs(sym("equi"), car(e)),    equi(eval(car(cdr(e)),cenv("12")), eval(car(cdr(cdr(e))),cenv("22"))),
+    ife(equs(sym("ltei"), car(e)),    ltei(eval(car(cdr(e)),cenv("12")), eval(car(cdr(cdr(e))),cenv("22"))),
+    ife(equs(sym("plus"), car(e)),    plus(eval(car(cdr(e)),cenv("12")), eval(car(cdr(cdr(e))),cenv("22"))),
+    ife(equs(sym("minus"), car(e)),   minus(eval(car(cdr(e)),cenv("12")), eval(car(cdr(cdr(e))),cenv("22"))),
+    ife(equs(sym("times"), car(e)),   times(eval(car(cdr(e)),cenv("12")), eval(car(cdr(cdr(e))),cenv("22"))),
+    ife(equs(sym("cons"), car(e)),    cons(eval(car(cdr(e)), cenv("12")), eval(car(cdr(cdr(e))),cenv("22"))),
+    ife(equs(sym("car"), car(e)),     car(eval(car(cdr(e)),cenv("11"))),
+    ife(equs(sym("cdr"), car(e)),     cdr(eval(car(cdr(e)),cenv("11"))),
     ife(equs(sym("my_arr_new"), car(e)), my_arr_new,
     ife(equs(sym("my_arr"), car(e)),     my_arr,
-    ife(equs(sym("arr_get"), car(e)),    arr_get(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env)),
-    ife(equs(sym("arr_put"), car(e)),    arr_put(eval(car(cdr(e)),env), eval(car(cdr(cdr(e))), env), eval(car(cdr(cdr(cdr(e)))), env)),
-    ife(equs(sym("eprint"), car(e)),     eprint(1,eval(car(cdr(e)),env)),
+    ife(equs(sym("arr_get"), car(e)),    arr_get(eval(car(cdr(e)),cenv("12")), eval(car(cdr(cdr(e))), cenv("22"))),
+    ife(equs(sym("arr_put"), car(e)),    arr_put(eval(car(cdr(e)),cenv("13")), eval(car(cdr(cdr(e))), cenv("23")), eval(car(cdr(cdr(cdr(e)))), cenv("23"))),
+    ife(equs(sym("eprint"), car(e)),     eprint(cons("--", eval(car(cdr(e)),cenv("11")))),
     {
       //println("EXP: "+e)
       //println("CAR(e): "+car(e))
       //println("CAR(CDR(e)): "+car(cdr((e))))
-                                         apply(eval(car(e),env), eval(car(cdr(e)),env))  // eval only one arg?
+                                         apply(eval(car(e),cenv("fun")), eval(car(cdr(e)),cenv("arg")))  // eval only one arg?
     }
     )))))))))))))))))))))))
   }
 
   def apply: Fun2[Term,Term,Term] = fun2("apply") { (f,x) => // ((lambda f x body) env) @ x
     //println(s"apply $f @ $x")
-    begin(eprint(1,car(cdr(car(f)))),
-    eval(car(cdr(cdr(cdr(car(f))))), cons(cons(car(cdr(cdr(car(f)))), x), cons(cons(car(cdr(car(f))), f), cdr(f)))))
+    val body = car(cdr(cdr(cdr(car(f)))))
+    val xnme = car(cdr(cdr(car(f))))
+    val fnme = car(cdr(car(f)))
+    val senv = cdr(f)
+    val env = car(senv)
+    val ctx = cdr(senv)
+    eval(body, cons(cons(cons(xnme, x), cons(cons(fnme, f), env)), ctx))
   }
 
   def list(xs: Term1*): Term1 = if (xs.isEmpty) nil else cons(xs.head, list(xs.tail:_*))
@@ -1139,8 +1182,8 @@ trait ProgEval extends LangX {
     case x::xs => cons(data(x), data(xs))
   }
 
-  def global_env(order: List[String], funs: Map[String, Any], deps: Map[String,List[String]], env: Term1 = nil): Term1 = order match {
-    case Nil => env
+  def global_env(order: List[String], funs: Map[String, Any], deps: Map[String,List[String]], senv: Term1 = cons(nil,list("root"))): Term1 = order match {
+    case Nil => senv
     case x::xs =>
       var f = funs(x)
       deps.get(x) match {
@@ -1158,7 +1201,10 @@ trait ProgEval extends LangX {
           }
           f = List("lambda", fn, fa, b)
       }
-      global_env(xs, funs, deps, cons(cons(x, cons(data(f), env)), env))
+      val env = car(senv)
+      val ctx = cdr(senv)
+      def cenv(s: String) = cons(env,cons(s,ctx))
+      global_env(xs, funs, deps, cons(cons(cons(x, cons(data(f), cenv("glo-"+x))), env), ctx))
   }
 }
 
@@ -1173,6 +1219,7 @@ trait RunHighLevel extends ProgEval with LangLowLevel {
     val ev = eval
 
     stms = stms :+ Put(Mem,Const("in"),code) :+ Put(Mem,Const("env"),env)
+    stms = stms :+ Print(Get(Mem,Const("in")),Get(Mem,Const("env")))
 
     val res = ev(Get(Mem,Const("in")),Get(Mem,Const("env")))
     stms = stms :+ Output(res)
@@ -1305,7 +1352,7 @@ trait Code2DataProgEval extends ProgEval with Code2Data {
   override def my_arr: Term1 = List("my_arr")
   override def arr_get(a: Term1, i: Term1): Term1 = List("arr_get", a, i)
   override def arr_put(a: Term1, i: Term1, v: Term1): Term1 = List("arr_put", a, i, v)
-  override def eprint(n: Int, x: Term1): Term1 = List("eprint", x) // FIXME: ident
+  override def eprint(x: Term1): Term1 = List("eprint", x)
 }
 
 /* ---------- PART 6: tests ---------- */
@@ -1349,10 +1396,14 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val d = new Code2Data {}
     val p = program(d)
     val fn = p.f
+
     val i = new ProgEval with LangDirect
     import i._
-    assert(eval(list(fn, data(p.a)), global_env(d.order, d.funs, d.deps)) === data(p.b))
+    val exp = list(fn, data(p.a))
+    val env = global_env(d.order, d.funs, d.deps)
+    assert(eval(exp, env) === data(p.b))
   }
+
 
   test(id+": execute in high-level interpreter, which is mapped to low-level code, which is interpreted") {
     val d = new Code2Data {}
@@ -1360,7 +1411,9 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val fn = p.f
     val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze
     import i._
-    runProg(list(sym(fn), data(p.a)), global_env(d.order, d.funs, d.deps))
+    val exp = list(sym(fn), data(p.a))
+    val env = global_env(d.order, d.funs, d.deps)
+    runProg(exp, env)
     assert(out === ev(data(p.b)))
     if (analyze) report(id+"-high")
   }
@@ -1375,7 +1428,9 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
 
     val i = new ProgEval with LangDirect
     import i._
-    assert(eval(list(en, list("cons", list("quote", list(fn, data(p.a))), list("quote", global_env(d.order, d.funs, d.deps)))), global_env(di.order, di.funs, di.deps)) === data(p.b))
+    val exp = list(en, list("cons", list("quote", list(fn, data(p.a))), list("quote", global_env(d.order, d.funs, d.deps))))
+    val env = global_env(di.order, di.funs, di.deps)
+    assert(eval(exp, env) === data(p.b))
   }
 
   test(id+": double-interpretation, low-level") {
@@ -1388,7 +1443,9 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
 
     val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze
     import i._
-    runProg(list(sym(en), list(sym("cons"), list(sym("quote"), list(sym(fn), data(p.a))), list(sym("quote"), global_env(d.order, d.funs, d.deps)))), global_env(di.order, di.funs, di.deps))
+    val exp = list(sym(en), list(sym("cons"), list(sym("quote"), list(sym(fn), data(p.a))), list(sym("quote"), global_env(d.order, d.funs, d.deps))))
+    val env = global_env(di.order, di.funs, di.deps)
+    runProg(exp, env)
     assert(out === ev(data(p.b)))
     if (analyze) report(id+"-high2")
   }
