@@ -681,8 +681,8 @@ trait Analyze extends RunLowLevel {
       hotedges.take(10).foreach(println)
       println()
 
-      val hottestEdge = hotedges.head
       if (verbose) {
+        val hottestEdge = hotedges.head
         println("hottest")
         println(hottestEdge)
         //println(indexToBlock(hottest._1) + " -> " + hottest._2)
@@ -929,12 +929,16 @@ trait Analyze extends RunLowLevel {
       hotspots.take(10).foreach(println)
       println
 
-      val hottest = hotspots.head
       //if (verbose) {
+      if (!hotspots.isEmpty) {
+        val hottest = hotspots.head
         println("hottest")
         println(hottest)
         println(indexToBlock(hottest._1) + " -> " + hottest._2)
         println()
+      } else {
+        println("NO hotspots")
+      }
       //}
 
       // compute hot edges / node pairs
@@ -944,12 +948,16 @@ trait Analyze extends RunLowLevel {
       hotedges.take(10).foreach(println)
       println()
 
-      val hottestEdge = hotedges.head
       //if (verbose) {
+      if (!hotedges.isEmpty) {
+        val hottestEdge = hotedges.head
         println("hottest")
         println(hottestEdge)
         //println(indexToBlock(hottest._1) + " -> " + hottest._2)
         println()
+      } else {
+        println("NO hot edges")
+      }
       //}
       
       // calc pred and succ
