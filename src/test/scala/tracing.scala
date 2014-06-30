@@ -596,6 +596,7 @@ trait Analyze extends RunLowLevel {
   }
 
 
+  def indexToBlockFun[A:Manifest](t: Vector[A]) = t.distinct.toArray
 
   // first version: inline deterministic jumps
   def analyzeDeterministicJumps(s1:String): Vector[Int] = {
@@ -608,7 +609,7 @@ trait Analyze extends RunLowLevel {
 
     // map blocks in trace to numeric indexes
     if (verbose) println("block <-> index:")
-    val indexToBlock = traceB.distinct.toArray
+    val indexToBlock = indexToBlockFun(traceB)
     val blockToIndex = indexToBlock.zipWithIndex.toMap
     if (verbose) println(blockToIndex)
 
@@ -670,7 +671,8 @@ trait Analyze extends RunLowLevel {
       if (verbose) {
         println("hottest")
         println(hottest)
-        println(indexToBlock(hottest._1) + " -> " + hottest._2)
+        val curIndexToBlock = indexToBlockFun(trace)
+        println(curIndexToBlock(hottest._1) + " -> " + hottest._2)
         println()
       }
 
@@ -685,7 +687,6 @@ trait Analyze extends RunLowLevel {
         val hottestEdge = hotedges.head
         println("hottest")
         println(hottestEdge)
-        //println(indexToBlock(hottest._1) + " -> " + hottest._2)
         println()
       }
 
@@ -849,7 +850,7 @@ trait Analyze extends RunLowLevel {
 
     // map blocks in trace to numeric indexes
     if (verbose) println("block <-> index:")
-    val indexToBlock = traceB.distinct.toArray
+    val indexToBlock = indexToBlockFun(traceB)
     val blockToIndex = indexToBlock.zipWithIndex.toMap
     if (verbose) println(blockToIndex)
 
@@ -934,7 +935,8 @@ trait Analyze extends RunLowLevel {
         val hottest = hotspots.head
         println("hottest")
         println(hottest)
-        println(indexToBlock(hottest._1) + " -> " + hottest._2)
+        val curIndexToBlock = indexToBlockFun(trace)
+        println(curIndexToBlock(hottest._1) + " -> " + hottest._2)
         println()
       } else {
         println("NO hotspots")
@@ -953,7 +955,6 @@ trait Analyze extends RunLowLevel {
         val hottestEdge = hotedges.head
         println("hottest")
         println(hottestEdge)
-        //println(indexToBlock(hottest._1) + " -> " + hottest._2)
         println()
       } else {
         println("NO hot edges")
