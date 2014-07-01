@@ -1362,16 +1362,25 @@ trait Program[A,B] {
   def program(c: Lang): c.P[A,B]
 }
 import org.scalatest.FunSuite
+
+import org.scalatest.Tag
+object DiLowTest extends Tag("tracing.di.low")
+object VmLowTest extends Tag("tracing.vm.low")
+object DiHighTest extends Tag("tracing.di.high")
+object VmHighTest extends Tag("tracing.vm.high")
+object DiHigh2Test extends Tag("tracing.di.high2")
+object VmHigh2Test extends Tag("tracing.vm.high2")
+
 trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
   def analyze: Boolean
-  test(id+": direct execution") {
+  test(id+": direct execution", DiLowTest) {
     val c = new LangDirect {}
     val p = program(c)
     import c._
     assert(p.f(p.a) === p.b)
   }
 
-  test(id+": translate to low-level code and interpret") {
+  test(id+": translate to low-level code and interpret", VmLowTest) {
     val c = new RunLowLevel with Analyze {
       override def report(name: String) = {
         //println(prog)
@@ -1392,7 +1401,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     if (analyze) report(id+"-low")
   }
 
-  test(id+": execute in high-level interpreter, which is executed directly") {
+  test(id+": execute in high-level interpreter, which is executed directly", DiHighTest) {
     val d = new Code2Data {}
     val p = program(d)
     val fn = p.f
@@ -1404,8 +1413,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     assert(eval(exp, env) === data(p.b))
   }
 
-
-  test(id+": execute in high-level interpreter, which is mapped to low-level code, which is interpreted") {
+  test(id+": execute in high-level interpreter, which is mapped to low-level code, which is interpreted", VmHighTest) {
     val d = new Code2Data {}
     val p = program(d)
     val fn = p.f
@@ -1418,7 +1426,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     if (analyze) report(id+"-high")
   }
 
-  test(id+": double-interpretation, direct") {
+  test(id+": double-interpretation, direct", DiHigh2Test) {
     val di = new Code2DataProgEval {}
     val en = di.eval
 
@@ -1433,7 +1441,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     assert(eval(exp, env) === data(p.b))
   }
 
-  test(id+": double-interpretation, low-level") {
+  test(id+": double-interpretation, low-level", VmHigh2Test) {
     val di = new Code2DataProgEval {}
     val en = di.eval
 
