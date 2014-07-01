@@ -655,7 +655,7 @@ trait Analyze extends RunLowLevel {
     if (verbose) println(blockToIndex)
 
     var trace = traceB map blockToIndex
-    var interesting = Set.empty[Int] // empty
+    var interesting = trace.toSet// empty
 
     if (tracePrefix != "") {
       val inner = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex)
