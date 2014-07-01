@@ -191,7 +191,9 @@ trait Eval extends Syntax with Print with Runtime {
       else TrampoLabel(x1)
   }
   def exec(stm: Stm): Unit = { /*println(stm);*/ stm } match {
-    case Print(as @ _*) => println(as.map(a=>eval[Any](a)).map(objToString).mkString)
+    case Print(as @ _*) => 
+      val str = as.map(a=>eval[Any](a)).map(objToString).mkString
+      trace = trace :+ str
     case Output(a) => output(eval[Any](a))
     case Put(a,b,c) => (eval[Obj](a))(eval[Any](b)) = eval[Any](c)
     case New(a,b) => (eval[Obj](a))(eval[Any](b)) = new mutable.HashMap
@@ -566,6 +568,8 @@ trait RunLowLevel extends LangLowLevel {
 trait Analyze extends RunLowLevel {
   val verbose = false
 
+  val tracePrefix: String = ""
+
   class GraphPrinter(s1: String) {
     // export graph viz
     val dir = new File(s"graphs-$s1")
@@ -625,9 +629,11 @@ trait Analyze extends RunLowLevel {
 
   def report(s1:String) = {
     // note: both steps can be run independently or together.
+
+
     val tr1 = analyzeDeterministicJumps(s1+"A")
-    this.trace = tr1.map(_.toString)
-    val tr2 = analyzeTraceHierarchies(s1+"B")
+    //this.trace = tr1.map(_.toString)
+    //val tr2 = analyzeTraceHierarchies(s1+"B")
   }
 
 
@@ -649,6 +655,21 @@ trait Analyze extends RunLowLevel {
     if (verbose) println(blockToIndex)
 
     var trace = traceB map blockToIndex
+
+    if (tracePrefix != "") {
+      var interesting = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex).distinct
+
+      traceB.foreach(println)
+
+      println("INTERESTING1:" + traceB.filter(_.startsWith(tracePrefix)))
+      println("INTERESTING2:" + interesting)
+
+      // for now filter them out again ... makes generating graphs really slow..
+      // XXX
+      val ex = interesting.toSet
+      trace = trace.filterNot(ex)
+    }
+
 
     // merge nodes
     var count = indexToBlock.length
@@ -1409,7 +1430,9 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val d = new Code2Data {}
     val p = program(d)
     val fn = p.f
-    val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze
+    val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze {
+      override val tracePrefix = "--(--"
+    }
     import i._
     val exp = list(sym(fn), data(p.a))
     val env = global_env(d.order, d.funs, d.deps)
@@ -1441,7 +1464,9 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val p = program(d)
     val fn = p.f
 
-    val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze
+    val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze{
+      override val tracePrefix = "--(-- --"
+    }
     import i._
     val exp = list(sym(en), list(sym("cons"), list(sym("quote"), list(sym(fn), data(p.a))), list(sym("quote"), global_env(d.order, d.funs, d.deps))))
     val env = global_env(di.order, di.funs, di.deps)
