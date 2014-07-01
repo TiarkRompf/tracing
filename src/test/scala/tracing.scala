@@ -605,13 +605,13 @@ trait Analyze extends RunLowLevel {
         val color = if (edges contains (a,b)) "red" else "black"
         out.println(s"""L$a -> L$b [label=\" $f $extra\" weight="$f" color="$color" penwidth="${fw}"]""")
       }
-      /* draw edge hop frequences:  a -> ? -> b
+      /* draw edge hop frequences:  a -> ? -> b */
       for (((a,b),f) <- edgehopfreq) {
         val fw = 0.5
         val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
         val color = "green"
         out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="0" color="$color" penwidth="${fw}"]""")
-      }*/    
+      }
       out.println("}")
       out.close()
       import scala.sys.process._
@@ -660,10 +660,15 @@ trait Analyze extends RunLowLevel {
     if (tracePrefix != "") {
       val inner = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex)
 
-      println("INTERESTING1:" + traceB.filter(_.startsWith(tracePrefix)))
+      println("INTERESTING1:")
+      traceB.filter(_.startsWith(tracePrefix)).foreach(println)
       println("INTERESTING2:" + inner)
 
       interesting = inner.toSet
+
+      // now discard any of the intermediate interpreter output (non-innermost)
+      val discard = traceB.filter(a=>a.startsWith("--") && !a.startsWith(tracePrefix)).map(blockToIndex).toSet
+      trace = trace.filterNot(discard)
 
       // for now filter them out again ... makes generating graphs really slow..
       // XXX
@@ -747,21 +752,15 @@ trait Analyze extends RunLowLevel {
         println()
       }
 
+      val itrace = trace.filter(interesting)
+
       // compute hot node triples
-      val edgetripfreq = (trace zip trace.drop(1) zip trace.drop(2)) collectBy(x=>(x._1._1,x._1._2,x._2), _.length);
-      val edgehopfreq = (trace zip trace.drop(1) zip trace.drop(2)) collectBy(x=>(x._1._1,x._2), _.length);
+      val edgehopfreq = (itrace zip itrace.drop(1)) collectBy(x=>x, _.length);
 
-      if (verbose) {
-        println("hot edge triples:")
-        val hotedgestrip = edgetripfreq.toSeq.sortBy(-_._2)
-        hotedgestrip.take(10).foreach(println)
-        println()
-
-        println("hot edge hops:")
-        val hotedgeshop = edgehopfreq.toSeq.sortBy(-_._2)
-        hotedgeshop.take(10).foreach(println)
-        println()
-      }
+      println("hot inner edges:")
+      val hotedgestrip = edgehopfreq.toSeq.sortBy(-_._2)
+      hotedgestrip.take(10).foreach(println)
+      println()
 
       // compute pred/succ sets, specificity
 
@@ -772,13 +771,6 @@ trait Analyze extends RunLowLevel {
         println(pred.getOrElse(h,Vector.empty) + " --> " + h + " --> " + succ.getOrElse(h,Vector.empty))
       }
       println()
-
-      if (verbose) {
-        for ((h,_) <- hotspots.take(10); ((a,`h`,b), f) <- edgetripfreq) {
-          println(a + " --> " + h + " --> " + b + s" (f=$f)")
-        }
-        println()
-      }
 
       val continueAnalyze: () => Nothing = { () => return analyze(step + 1) }
 
@@ -811,10 +803,14 @@ trait Analyze extends RunLowLevel {
         def succ0(x: Int) = succ.getOrElse(x,Seq())
 
         val loopThresh = 3
-        //val isoNodes = hotspots collect { case (h,f) if pred0(h) forall (p => succ(p).size == 1) => h }
-        //val isoEdges = hotedges collect { case ((a,b),f) if isoNodes contains b => (a,b) } // only edge
-        val isoNodes = hotspots collect { case (h,f) if !(succ0(h) contains h) || maxloopcount(h) <= loopThresh => h }
-        val isoEdges = hotedges collect { case ((a,b),f) if succ(a).size == 1 && (isoNodes contains b) => (a,b) } // specific transfer
+
+        def isloop(h: Int) = (succ0(h) contains h) // && (maxloopcount(h) > 2)
+
+        val isoEdges = hotedges collect { 
+          case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
+          case ((a,b),f) if succ(a).size == 1 && interesting(b) && !isloop(b) => 
+            interesting += a ;(a,b) // keep track of what's interesting
+        } // specific transfer
 
         gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(isoEdges)
 
@@ -895,6 +891,8 @@ trait Analyze extends RunLowLevel {
       gg.finish()
     }
   }
+
+
 
 
   def analyzeTraceHierarchies(s1:String): Vector[Int] = {
@@ -1039,8 +1037,11 @@ trait Analyze extends RunLowLevel {
          And now we stop, having reached a self-loop.
       */
 
+
       def isLoop(a: Int) = succ.getOrElse(a,Seq()) contains a
-      val hotspotsNoLoop = hotspots.map(_._1).filterNot(isLoop)
+      def nodeOk(a: Int) = /*interesting.contains(h) &&*/ !isLoop(a)
+
+      val hotspotsNoLoop = hotspots.map(_._1).filterNot(nodeOk)
       val pivot = hotspotsNoLoop.takeWhile(a=>freq(a) == freq(hotspotsNoLoop.head)).last
 
       if (freq(pivot) == 1) { // done, only loops remain
@@ -1140,6 +1141,15 @@ trait ProgEval extends LangX {
   }
   def eprint(x: Term1): Term1 = { iprint(1,cons("--", x)); num(0) }
 
+  /* 
+  FIXME: Right now 'eprint' is called at the beginning.
+  This means we log an expression like a * b at the time before
+  a and b are evaluated, not at the time the * operator is
+  executed. 
+  Is it sufficient to call 'eprint' at end? Or do we need both
+  beginning and end? (in that case we must not use exactly the 
+  same string, otherwise it would look like a loop).
+  */
   def eval: Fun2[Term,Term,Term] = fun2("eval") { (e,senv) =>
     val env = car(senv)
     val ctx = cdr(senv)
@@ -1241,7 +1251,7 @@ trait RunHighLevel extends ProgEval with LangLowLevel {
     val ev = eval
 
     stms = stms :+ Put(Mem,Const("in"),code) :+ Put(Mem,Const("env"),env)
-    stms = stms :+ Print(Get(Mem,Const("in")),Get(Mem,Const("env")))
+    //stms = stms :+ Print(Get(Mem,Const("in")),Get(Mem,Const("env")))
 
     val res = ev(Get(Mem,Const("in")),Get(Mem,Const("env")))
     stms = stms :+ Output(res)
@@ -1493,7 +1503,7 @@ trait ProgramFactorial extends Program[Int,Int] {
       if (n === 0) {
         1
       } else {
-        n * fac(n - 1)
+        fac(n - 1) * n
       }
     }
     new P[Int,Int] {
