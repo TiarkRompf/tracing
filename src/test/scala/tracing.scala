@@ -655,19 +655,20 @@ trait Analyze extends RunLowLevel {
     if (verbose) println(blockToIndex)
 
     var trace = traceB map blockToIndex
+    var interesting = Set.empty[Int] // empty
 
     if (tracePrefix != "") {
-      var interesting = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex).distinct
-
-      traceB.foreach(println)
+      val inner = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex)
 
       println("INTERESTING1:" + traceB.filter(_.startsWith(tracePrefix)))
-      println("INTERESTING2:" + interesting)
+      println("INTERESTING2:" + inner)
+
+      interesting = inner.toSet
 
       // for now filter them out again ... makes generating graphs really slow..
       // XXX
-      val ex = interesting.toSet
-      trace = trace.filterNot(ex)
+      //val ex = interesting.toSet
+      //trace = trace.filterNot(ex)
     }
 
 
