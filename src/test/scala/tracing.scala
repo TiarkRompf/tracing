@@ -664,9 +664,13 @@ trait Analyze extends RunLowLevel {
     // export graph viz
     val gg = new GraphPrinter(s)
 
+    var old_length = trace.length
     // perform one step of analysis/transformation
     def analyze(step: Int): Unit = {
       println(s"/* analysis pass $step */")
+      println("trace length: " + trace.length)
+      if (step > 0) println("shrinkage: " + (old_length-trace.length))
+      old_length = trace.length
 
       val freq = trace.collectBy(x => x, _.length)
 
