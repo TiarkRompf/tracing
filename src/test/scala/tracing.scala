@@ -591,7 +591,7 @@ trait Analyze extends RunLowLevel {
       // join all pdfs
       import scala.sys.process._
       (s"./pdfjoin.sh -o $combinedPdf " + 
-        dir.listFiles.filter(_.getName.endsWith(".pdf")).mkString(" ")).!!
+        dir.listFiles.filter(_.getName.endsWith(".pdf")).sortBy(x => (-x.length, x)).mkString(" ")).!!
     }
   }
 
