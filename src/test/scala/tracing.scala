@@ -729,6 +729,19 @@ trait Analyze extends RunLowLevel {
       trace = replaceAll(trace, List(a, b), List(a))
       // if (verbose) println(trace)
     }
+    def mergeEdges(isoEdges: Map[Int,Int]) = {
+      val nodesTopo = isoEdges.keys.toSeq.sortBy(- _)
+      val work = trace.toArray
+      var i = work.length - 2
+      while (i >= 0) {
+        if (isoEdges.get(work(i)) == Some(work(i+1))) {
+          work(i+1) = -1
+        }
+        i -= 1
+      }
+      trace = work.filter(_ >= 0).toVector
+      // if (verbose) println(trace)
+    }
     def dup(xs: List[Int]) = {
       val List(a,b) = xs
       val c = count
@@ -839,13 +852,10 @@ trait Analyze extends RunLowLevel {
           gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
         }
 
-        val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
-
         time("merge") {
-          for ((a,b) <- isoEdgesTopo)
-            merge(List(a,b))
+          mergeEdges(isoEdges.toMap)
         }
-        if (isoEdgesTopo.nonEmpty)
+        if (isoEdges.nonEmpty)
           continueAnalyze()
       }
 
