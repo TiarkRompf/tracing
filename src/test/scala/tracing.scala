@@ -692,7 +692,8 @@ trait Analyze extends RunLowLevel {
           interesting += a ;(a,b) // keep track of what's interesting
       } // specific transfer
 
-      gg.printGraph("%03d".format(step))(counts,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
+      if (step % 10 == 0 || isoEdges.isEmpty)
+        gg.printGraph("%03d".format(step))(counts,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
 
       mergeEdges(isoEdges)
 
