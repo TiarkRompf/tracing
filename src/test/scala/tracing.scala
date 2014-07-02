@@ -703,7 +703,14 @@ trait Analyze extends RunLowLevel {
 
       gg.printGraph("%03d".format(step))(counts,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
 
-      val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
+      val m = isoEdges.toMap
+      def chain(a: Int): Int = {
+        m.get(a) match {
+          case Some(b) => 1+chain(b)
+          case None => 0
+        }
+      }
+      val isoEdgesTopo = isoEdges.sortBy { case (a,b) => chain(a) }
       for ((a,b) <- isoEdgesTopo)
         merge(List(a,b))
       if (isoEdges.nonEmpty)
