@@ -636,6 +636,13 @@ trait Analyze extends RunLowLevel {
     //val tr2 = analyzeTraceHierarchies(s1+"B")
   }
 
+  def time[A](msg: String)(a: => A) = {
+    val start = System.nanoTime
+    val result = a
+    val end = (System.nanoTime - start) / (1000 * 1000)
+    System.out.println(msg + " completed in %d milliseconds".format(end))
+    result
+  }
 
   def replaceAll(trace: Vector[Int], a: List[Int], b: List[Int]) = {
     val r = new mutable.ArrayBuffer[Int]()
@@ -821,18 +828,23 @@ trait Analyze extends RunLowLevel {
         val loopThresh = 3
         def isloop(h: Int) = (succ0(h) contains h) // && (maxloopcount(trace)(h) >= loopThresh)
 
-        val isoEdges = hotedges collect { 
-          case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
-          case ((a,b),f) if succ(a).size == 1 && interesting(b) && !isloop(b) => 
-            interesting += a ;(a,b) // keep track of what's interesting
-        } // specific transfer
-
-        gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
+        val isoEdges = time("findEdges") {
+          hotedges collect { 
+            case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
+            case ((a,b),f) if succ(a).size == 1 && interesting(b) && !isloop(b) => 
+              interesting += a ;(a,b) // keep track of what's interesting
+          } // specific transfer
+        }
+        time("printGraph") {
+          gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
+        }
 
         val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
 
-        for ((a,b) <- isoEdgesTopo)
-          merge(List(a,b))
+        time("merge") {
+          for ((a,b) <- isoEdgesTopo)
+            merge(List(a,b))
+        }
         if (isoEdgesTopo.nonEmpty)
           continueAnalyze()
       }
