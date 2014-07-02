@@ -203,28 +203,6 @@ trait Eval extends Syntax with Print with Runtime {
     //println("OUT:"+a)
     out = a
   }
-
-  def merge(l1: Label, l2: Label) = {
-
-    val b2 = prog(l2)
-
-    def merge0(b1: Block): Block = {
-      val Block(stms,jmp) = merge1(b1.cont)
-      Block(b1.stms++stms, jmp)
-    }
-    def merge1(b1: Jump): Block = b1 match {
-      case Goto(Const(`l2`)) => b2 // optimize guard if always true!
-      case Goto(t1) => Block(Nil,Guard(t1,l2,b2))
-      case Guard(tx,lx,bx) => Block(Nil,Guard(tx,lx,merge0(bx)))
-    }
-
-    val b1 = prog(l1)
-    prog(l1) = merge0(b1)
-
-  }
-
-  def mergeAll(ls: List[Label]) =
-    if (ls.nonEmpty) for (l2 <- ls.tail) merge(ls.head,l2)
 }
 
 trait LowLevel extends Syntax with Eval with Print
@@ -566,28 +544,19 @@ trait RunLowLevel extends LangLowLevel {
 /* ---------- PART 3: profiling etc (currently out of order ...) ---------- */
 
 trait Analyze extends RunLowLevel {
-  val verbose = false
-
   def tracePrefix: String = ""
 
-  class GraphPrinter(s1: String) {
+  class GraphPrinter(s: String) {
     // export graph viz
-    val dir = new File(s"graphs-$s1")
+    val dir = new File(s"graphs-$s")
     dir.mkdirs
     dir.listFiles.foreach(_.delete)
-    val combinedPdf = new File(s"graphs-all-$s1.pdf")
+    val combinedPdf = new File(s"graphs-all-$s.pdf")
     if (combinedPdf.exists) combinedPdf.delete
 
-    def printGraph(s2:String)(mergeHist: Int=>Seq[Int],maxloopcount:Int=>Int, freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
+    def printGraph(s2:String)(counts: Int=>Int,maxloopcount:Int=>Int, freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
       val out = new PrintStream(new File(dir,s"g$s2.dot"))
       out.println("digraph G {")
-      //out.println("rankdir=LR")
-
-      /*out.println("""struct1 [shape=plaintext label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"><TR><TD>""")
-      out.println("foo1<BR/>")
-      out.println("foo2<BR/>")
-      out.println("foo3<BR/>")
-      out.println("""</TD></TR></TABLE>>];""")*/
 
       val fmax = freq.values.max
       val pmax = 15
@@ -595,7 +564,7 @@ trait Analyze extends RunLowLevel {
       val nodes = (edges.map(_._1)) //++ edges.map(_._2)).distinct
       for ((a,f) <- freq) {
         val fw = scale(f)
-        val size = mergeHist(a).length
+        val size = counts(a)
         val color = if (nodes contains a) "red" else "black"
         out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" color="$color" penwidth="${fw}" shape=box]""")
       }
@@ -626,16 +595,9 @@ trait Analyze extends RunLowLevel {
     }
   }
 
-
-  def report(s1:String) = {
-    // note: both steps can be run independently or together.
-
-
-    val tr1 = analyzeDeterministicJumps(s1+"A")
-    //this.trace = tr1.map(_.toString)
-    //val tr2 = analyzeTraceHierarchies(s1+"B")
+  def report(s: String) {
+    analyzeTrace(s)
   }
-
 
   def replaceAll(trace: Vector[Int], a: List[Int], b: List[Int]) = {
     val r = new mutable.ArrayBuffer[Int]()
@@ -654,7 +616,6 @@ trait Analyze extends RunLowLevel {
     r.toVector
   }
 
-
   // find max iteration count
   def maxloopcount(trace: Vector[Int])(a: Int): Int = {
     var k = 0
@@ -672,8 +633,7 @@ trait Analyze extends RunLowLevel {
 
   def indexToBlockFun[A:Manifest](t: Vector[A]) = t.distinct.toArray
 
-  // first version: inline deterministic jumps
-  def analyzeDeterministicJumps(s1:String): Vector[Int] = {
+  def analyzeTrace(s: String) {
     val traceB = this.trace
 
     implicit class MySeqOps[T](xs: Seq[T]) {
@@ -681,404 +641,78 @@ trait Analyze extends RunLowLevel {
         xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
     }
 
-    // map blocks in trace to numeric indexes
-    if (verbose) println("block <-> index:")
     val indexToBlock = indexToBlockFun(traceB)
     val blockToIndex = indexToBlock.zipWithIndex.toMap
-    if (verbose) println(blockToIndex)
-
     var trace = traceB map blockToIndex
-    var interesting = trace.toSet// empty
-
-    if (tracePrefix != "") {
+    var interesting = if (tracePrefix != "") {
       val inner = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex)
-
-      println("INTERESTING1:")
-      traceB.filter(_.startsWith(tracePrefix)).foreach(println)
-      println("INTERESTING2:" + inner)
-
-      interesting = inner.toSet
 
       // now discard any of the intermediate interpreter output (non-innermost)
       val discard = traceB.filter(a=>a.startsWith("--") && !a.startsWith(tracePrefix)).map(blockToIndex).toSet
       trace = trace.filterNot(discard)
 
-      // for now filter them out again ... makes generating graphs really slow..
-      // XXX
-      //val ex = interesting.toSet
-      //trace = trace.filterNot(ex)
+      inner.toSet
+    } else {
+      trace.toSet
     }
 
-
     // merge nodes
-    var count = indexToBlock.length
-    val mergeHist = new Array[Vector[Int]](10000)
-    for (i <- 0 until mergeHist.length)
-      mergeHist(i) = Vector(i)
+    val counts = new Array[Int](10000)
+    for (i <- 0 until counts.length)
+      counts(i) = 0
 
     def merge(xs: List[Int]) = {
       val List(a,b) = xs
-      mergeHist(a) = mergeHist(a) ++ mergeHist(b)
+      counts(a) = counts(a) + counts(b)
       trace = replaceAll(trace, List(a, b), List(a))
-      // if (verbose) println(trace)
-    }
-    def dup(xs: List[Int]) = {
-      val List(a,b) = xs
-      val c = count
-      count += 1
-      mergeHist(c) = mergeHist(b)
-      trace = replaceAll(trace, List(a, b), List(a, c))
-      //println(trace)
     }
 
     // export graph viz
-    val gg = new GraphPrinter(s1)
+    val gg = new GraphPrinter(s)
 
     // perform one step of analysis/transformation
     def analyze(step: Int): Unit = {
       if (step > 500) return println("ABORT")
       println(s"/* analysis pass $step */")
 
-      // compute frequencies, sort to find hotspots
       val freq = trace.collectBy(x=>x, _.length)
-      println("hotspots:")
-      val hotspots = freq.toSeq.sortBy(-_._2)
-      hotspots.take(10).foreach(println)
 
-      val hottest = hotspots.head
-      if (verbose) {
-        println("hottest")
-        println(hottest)
-        val curIndexToBlock = indexToBlockFun(trace)
-        println(curIndexToBlock(hottest._1) + " -> " + hottest._2)
-        println()
-      }
+      val edges = trace zip trace.drop(1)
 
-      // compute hot edges / node pairs
-      val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
-      println("hot edges:")
-      val hotedges = edgefreq.toSeq.sortBy(-_._2)
-      hotedges.take(10).foreach(println)
-      println()
-
-      if (verbose) {
-        val hottestEdge = hotedges.head
-        println("hottest")
-        println(hottestEdge)
-        println()
-      }
+      val edgefreq = edges collectBy(x=>x, _.length)
 
       val itrace = trace.filter(interesting)
+      val iedges = itrace zip itrace.drop(1)
 
-      // compute hot node triples
-      val edgehopfreq = (itrace zip itrace.drop(1)) collectBy(x=>x, _.length);
+      val edgehopfreq = iedges collectBy(x=>x, _.length);
 
-      println("hot inner edges:")
-      val hotedgestrip = edgehopfreq.toSeq.sortBy(-_._2)
-      hotedgestrip.take(10).foreach(println)
-      println()
-
-      // compute pred/succ sets, specificity
-
-      val pred = (trace zip trace.drop(1)) collectBy(_._2, _.map(_._1).distinct);
-      val succ = (trace zip trace.drop(1)) collectBy(_._1, _.map(_._2).distinct);
-
-      for ((h,_) <- hotspots.take(10)) {
-        println(pred.getOrElse(h,Vector.empty) + " --> " + h + " --> " + succ.getOrElse(h,Vector.empty))
-      }
-      println()
+      val pred = edges collectBy(_._2, _.map(_._1).distinct);
+      val succ = edges collectBy(_._1, _.map(_._2).distinct);
 
       val continueAnalyze: () => Nothing = { () => return analyze(step + 1) }
 
-      /* 
-      Trying two variants: (1) considers one node at a time in order
-      of execution frequency, whereas (2) considers all jumps at once.
+      def pred0(x: Int) = pred.getOrElse(x,Seq())
+      def succ0(x: Int) = succ.getOrElse(x,Seq())
 
-      The results seem to be about the same, but variant2 does 
-      more work per step and converges faster.
+      def isloop(h: Int) = (succ0(h) contains h)
 
-      The main limitation (e.g. for pascal) is that only fully
-      deterministic control transfers are inlined (i.e. A always 
-      followed by B).
+      val hotedges = edgefreq.toSeq.sortBy(-_._2)
+      val isoEdges = hotedges collect { 
+        case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
+        case ((a,b),f) if succ(a).size == 1 && interesting(b) && !isloop(b) => 
+          interesting += a ;(a,b) // keep track of what's interesting
+      } // specific transfer
 
-      In pascal, these are exhausted at some point.
+      gg.printGraph("%03d".format(step))(counts,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
 
-      So we need a way to "disentangle" the control flow more.
-      Looking at triples of nodes (AXB vs AYB) insted of just pairs
-      is one idea.
-      */
-
-      /* 
-      VARIANT 2: 
-        Find all deterministic control transfers (node A always calls B)
-        and inline them (unless B is a loop with > 2 iterations).
-      */
-
-      def variant2(): Unit = {
-        def pred0(x: Int) = pred.getOrElse(x,Seq())
-        def succ0(x: Int) = succ.getOrElse(x,Seq())
-
-        val loopThresh = 3
-
-        def isloop(h: Int) = (succ0(h) contains h) // && (maxloopcount(trace)(h) > 2)
-
-        val isoEdges = hotedges collect { 
-          case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
-          case ((a,b),f) if succ(a).size == 1 && interesting(b) && !isloop(b) => 
-            interesting += a ;(a,b) // keep track of what's interesting
-        } // specific transfer
-
-        gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
-
-        val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
-
-        for ((a,b) <- isoEdgesTopo)
-          merge(List(a,b))
-        if (isoEdges.nonEmpty)
-          continueAnalyze()
-      }
-
-      /* 
-      VARIANT 1: 
-        Pick hottest node with largest outdegree B. Find callers A,
-        who only call B. Inline B into A (unless B is a loop).
-      */
-
-      def variant1(): Unit = {
-        val max = hotspots.length
-        for (deg   <- max to 0 by -1; // outdegree
-             (h,f) <- hotspots if pred contains h) {
-          var hit: List[(Int,Int)] = Nil
-          if (succ contains h) {
-            // among the hottest hotspots, pick the one with the largest outdegree
-            if (succ(h).size == deg) {
-              // if it's a loop don't bother -- don't start peeling iterations
-              if (!(succ(h) contains h)) {
-                for (p <- pred(h) if succ(p).size == 1) {
-                  println(s" -----> merge $p,$h")
-                  if (p != h) {
-                    merge(List(p,h))
-                    hit = ((p,h))::hit
-                  } else println("EEE")
-                }
-              }
-            }
-          }
-          if (hit.nonEmpty) {
-            println(hit)
-            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(hit)
-            continueAnalyze()
-          }
-        }
-      }
-
-      // unroll small loops -- may or may not want to do this
-      def unrollSmallLoops(): Unit = {
-        for ((h,f) <- hotspots if succ contains h) {
-          if ((succ(h) contains h) && maxloopcount(trace)(h) <= 3) {
-            println(s" -----> unroll $h,$h")
-            merge(List(h,h))
-            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(List((h,h)))
-            continueAnalyze()
-          }
-        }
-      }
-
-
-      //unrollSmallLoops()
-      variant2()
+      val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
+      for ((a,b) <- isoEdgesTopo)
+        merge(List(a,b))
+      if (isoEdges.nonEmpty)
+        continueAnalyze()
 
       // print final graph
-      gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(Nil)
-    }
-
-    try {
-      analyze(0)
-      if (verbose) {
-        println()
-        println("merge history:")
-        mergeHist.filter(_.length > 1).foreach(println)
-        println()
-        println("final trace:")
-        println(trace)
-      }
-      trace
-    } finally {
-      gg.finish()
-    }
-  }
-
-
-
-
-  def analyzeTraceHierarchies(s1:String): Vector[Int] = {
-    val traceB = this.trace
-
-    implicit class MySeqOps[T](xs: Seq[T]) {
-      def collectBy[K,V](f1: T => K, f2: Seq[T] => V): Map[K,V] =
-        xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
-    }
-
-    // map blocks in trace to numeric indexes
-    if (verbose) println("block <-> index:")
-    val indexToBlock = indexToBlockFun(traceB)
-    val blockToIndex = indexToBlock.zipWithIndex.toMap
-    if (verbose) println(blockToIndex)
-
-    var trace = traceB map blockToIndex
-
-    // merge nodes
-    var count = indexToBlock.length
-    val mergeHist = new Array[Vector[Int]](10000)
-    for (i <- 0 until mergeHist.length)
-      mergeHist(i) = Vector(i)
-
-    def merge(xs: List[Int]) = {
-      val List(a,b) = xs
-      mergeHist(a) = mergeHist(a) ++ mergeHist(b)
-      trace = replaceAll(trace, List(a, b), List(a))
-      // if (verbose) println(trace)
-    }
-    def dup(xs: List[Int]) = {
-      val List(a,b) = xs
-      val c = count
-      count += 1
-      mergeHist(c) = mergeHist(b)
-      trace = replaceAll(trace, List(a, b), List(a, c))
-      //println(trace)
-    }
-
-    val gg = new GraphPrinter(s1)
-
-    def splitWhere[T](xs0: Seq[T])(f: T => Boolean): List[Seq[T]] = { 
-      val buf = new scala.collection.mutable.ListBuffer[Seq[T]]
-      var xs = xs0
-      while (true) {
-        val i = xs.indexWhere(f) 
-        if (i < 0) {
-          buf += xs
-          return buf.result
-        } else { 
-          val (h,t) = xs.splitAt(i+1)
-          buf += h
-          xs = t
-        } 
-      }
-      throw new Exception
-    }
-    assert(splitWhere(List(1,2,3,4,5,6,7,8,9))(_ % 4 == 0) == 
-      List(List(1, 2, 3, 4), List(5, 6, 7, 8), List(9)))
-
-    // perform one step of analysis/transformation
-    def analyze(step: Int): Vector[Int] = {
-      if (step > 30) {
-        println("ABORT")
-        return trace
-      }
-      println(s"/* analysis pass $step */")
-
-      // compute frequencies, sort to find hotspots
-      val freq = trace.collectBy(x=>x, _.length)
-      println("hotspots:")
-      val hotspots = freq.toSeq.sortBy(-_._2)
-      hotspots.take(10).foreach(println)
-      println
-
-      //if (verbose) {
-      if (!hotspots.isEmpty) {
-        val hottest = hotspots.head
-        println("hottest")
-        println(hottest)
-        val curIndexToBlock = indexToBlockFun(trace)
-        println(curIndexToBlock(hottest._1) + " -> " + hottest._2)
-        println()
-      } else {
-        println("NO hotspots")
-      }
-      //}
-
-      // compute hot edges / node pairs
-      val edgefreq = (trace zip trace.drop(1)) collectBy(x=>x, _.length);
-      println("hot edges:")
-      val hotedges = edgefreq.toSeq.sortBy(-_._2)
-      hotedges.take(10).foreach(println)
-      println()
-
-      //if (verbose) {
-      if (!hotedges.isEmpty) {
-        val hottestEdge = hotedges.head
-        println("hottest")
-        println(hottestEdge)
-        println()
-      } else {
-        println("NO hot edges")
-      }
-      //}
-      
-      // calc pred and succ
-      val pred = (trace zip trace.drop(1)) collectBy(_._2, _.map(_._1).distinct);
-      val succ = (trace zip trace.drop(1)) collectBy(_._1, _.map(_._2).distinct);
-
-
-      /* main analysis part follows:
-
-         Find the `pivot` node: the most frequent one which is not already a self-loop.
-         Identify all traces from pivot to pivot.
-         This set of traces corresponds to a trace tree (Franz/Gal), but we don't stop here.
-         Collapse each trace into a single block:
-              ... A B A C D A B A E F A B A C D A B A ...
-                        becomes with pivot A:
-              ... A [BA] [CDA] [BA] [EFA] [BA] [CDA] [BA] ...
-         We continue the process. [BA] will be the new pivot, and we group:
-              ... A [BA] [[CDA][BA]] [[EFA][BA]] [[CDA][BA]] ...
-         Next iteration will group:
-              ... A [BA] [CDABAEFABA] [CDABAEFABA] ...
-         And now we stop, having reached a self-loop.
-      */
-
-
-      def isLoop(a: Int) = succ.getOrElse(a,Seq()) contains a
-      def nodeOk(a: Int) = /*interesting.contains(h) &&*/ !isLoop(a)
-
-      val hotspotsNoLoop = hotspots.map(_._1).filterNot(nodeOk)
-      val pivot = hotspotsNoLoop.takeWhile(a=>freq(a) == freq(hotspotsNoLoop.head)).last
-
-      if (freq(pivot) == 1) { // done, only loops remain
-        gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,Map.empty)(Nil)
-        return trace
-      }
-
-      gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,Map.empty)(List((pivot,pivot)))
-
-      val ignoreHeadAndTail = true
-
-      val traces0 = splitWhere(trace)(_ == pivot)
-      val traces = if (ignoreHeadAndTail)
-          traces0.head.map(List(_)) ++ traces0.tail.init ++ traces0.last.map(List(_))
-        else
-          traces0
-      val hottraces = traces.groupBy(x=>x).map{case(k,v)=>(k,v.length)}.toSeq.sortBy(-_._2)
-
-      println
-      println("5 hot traces")
-      //hottraces.take(5).foreach{case(t,c)=>println("---"+c);t.foreach(println)}
-      hottraces.take(10).foreach(p=>println(p._2+"*"+p._1.mkString(" ")))
-
-      // build a trace of traces ...
-
-      println("block <-> index:")
-      val indexToBlock2 = traces.distinct.toArray
-      val blockToIndex2 = indexToBlock2.zipWithIndex.toMap
-      println(blockToIndex2)
-
-      trace = (traces map blockToIndex2).toVector
-
-      println
-      println("trace")
-      println(trace)
-
-      analyze(step+1)
-
+      gg.printGraph("%03d".format(step))(counts,maxloopcount(trace),freq,edgefreq,edgehopfreq)(Nil)
     }
 
     try {
@@ -1087,7 +721,6 @@ trait Analyze extends RunLowLevel {
       gg.finish()
     }
   }
-
 }
 
 /* ---------- PART 4: high-level term interpreter ---------- */
@@ -1414,19 +1047,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
   }
 
   test(id+": translate to low-level code and interpret", VmLowTest) {
-    val c = new RunLowLevel with Analyze {
-      override def report(name: String) = {
-        //println(prog)
-        trace.foreach(println)
-
-        println("hotspots:")
-        val hotspots = trace.groupBy(x=>x).map{ case (k,v)=>(k,v.length) }.toSeq.sortBy(-_._2)
-        hotspots.take(10).foreach(println)
-        println()
-
-        super.report(name)
-      }
-    }
+    val c = new RunLowLevel with Analyze
     val p = program(c)
     import c._
     runLow(p.f, ev(p.a))
