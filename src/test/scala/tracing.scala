@@ -663,7 +663,6 @@ trait Analyze extends RunLowLevel {
 
     // perform one step of analysis/transformation
     def analyze(step: Int): Unit = {
-      if (step > 500) return println("ABORT")
       println(s"/* analysis pass $step */")
 
       val freq = trace.collectBy(x=>x, _.length)
