@@ -654,6 +654,22 @@ trait Analyze extends RunLowLevel {
     r.toVector
   }
 
+
+  // find max iteration count
+  def maxloopcount(trace: Vector[Int])(a: Int): Int = {
+    var k = 0
+    var c = 0
+    for (t <- trace) {
+      if (t == a) {
+        c += 1
+      } else {
+        k = c max k
+        c = 0
+      }
+    }
+    c max k
+  }
+
   def indexToBlockFun[A:Manifest](t: Vector[A]) = t.distinct.toArray
 
   // first version: inline deterministic jumps
@@ -713,19 +729,6 @@ trait Analyze extends RunLowLevel {
       mergeHist(c) = mergeHist(b)
       trace = replaceAll(trace, List(a, b), List(a, c))
       //println(trace)
-    }
-
-    // find max iteration count
-    def maxloopcount(a: Int): Int = {
-      var k = 0
-      val str0 = trace.mkString(";",";;",";")
-      var search = s";$a;"
-      while (true) {
-        if (!str0.contains(search)) return k
-        k += 1
-        search = search + s";$a;"
-      }
-      k
     }
 
     // export graph viz
@@ -817,7 +820,7 @@ trait Analyze extends RunLowLevel {
 
         val loopThresh = 3
 
-        def isloop(h: Int) = (succ0(h) contains h) // && (maxloopcount(h) > 2)
+        def isloop(h: Int) = (succ0(h) contains h) // && (maxloopcount(trace)(h) > 2)
 
         val isoEdges = hotedges collect { 
           case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
@@ -825,7 +828,7 @@ trait Analyze extends RunLowLevel {
             interesting += a ;(a,b) // keep track of what's interesting
         } // specific transfer
 
-        gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(isoEdges)
+        gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
 
         val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
 
@@ -863,7 +866,7 @@ trait Analyze extends RunLowLevel {
           }
           if (hit.nonEmpty) {
             println(hit)
-            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(hit)
+            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(hit)
             continueAnalyze()
           }
         }
@@ -872,10 +875,10 @@ trait Analyze extends RunLowLevel {
       // unroll small loops -- may or may not want to do this
       def unrollSmallLoops(): Unit = {
         for ((h,f) <- hotspots if succ contains h) {
-          if ((succ(h) contains h) && maxloopcount(h) <= 3) {
+          if ((succ(h) contains h) && maxloopcount(trace)(h) <= 3) {
             println(s" -----> unroll $h,$h")
             merge(List(h,h))
-            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(List((h,h)))
+            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(List((h,h)))
             continueAnalyze()
           }
         }
@@ -886,7 +889,7 @@ trait Analyze extends RunLowLevel {
       variant2()
 
       // print final graph
-      gg.printGraph("%03d".format(step))(mergeHist,maxloopcount,freq,edgefreq,edgehopfreq)(Nil)
+      gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(Nil)
     }
 
     try {
@@ -943,19 +946,6 @@ trait Analyze extends RunLowLevel {
       mergeHist(c) = mergeHist(b)
       trace = replaceAll(trace, List(a, b), List(a, c))
       //println(trace)
-    }
-
-    // find max iteration count
-    def maxloopcount(a: Int): Int = {
-      var k = 0
-      val str0 = trace.mkString(";",";;",";")
-      var search = s";$a;"
-      while (true) {
-        if (!str0.contains(search)) return k
-        k += 1
-        search = search + s";$a;"
-      }
-      k
     }
 
     val gg = new GraphPrinter(s1)
@@ -1054,11 +1044,11 @@ trait Analyze extends RunLowLevel {
       val pivot = hotspotsNoLoop.takeWhile(a=>freq(a) == freq(hotspotsNoLoop.head)).last
 
       if (freq(pivot) == 1) { // done, only loops remain
-        gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount,freq,edgefreq,Map.empty)(Nil)
+        gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,Map.empty)(Nil)
         return trace
       }
 
-      gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount,freq,edgefreq,Map.empty)(List((pivot,pivot)))
+      gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,Map.empty)(List((pivot,pivot)))
 
       val ignoreHeadAndTail = true
 
