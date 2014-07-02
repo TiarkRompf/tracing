@@ -770,7 +770,7 @@ trait Analyze extends RunLowLevel {
 
       val itrace = trace.filter(interesting)
 
-      // compute hot node triples
+      // compute hot edges among 'interesting' nodes
       val edgehopfreq = (itrace zip itrace.drop(1)) collectBy(x=>x, _.length);
 
       println("hot inner edges:")
@@ -819,8 +819,7 @@ trait Analyze extends RunLowLevel {
         def succ0(x: Int) = succ.getOrElse(x,Seq())
 
         val loopThresh = 3
-
-        def isloop(h: Int) = (succ0(h) contains h) // && (maxloopcount(trace)(h) > 2)
+        def isloop(h: Int) = (succ0(h) contains h) // && (maxloopcount(trace)(h) >= loopThresh)
 
         val isoEdges = hotedges collect { 
           case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
@@ -834,7 +833,7 @@ trait Analyze extends RunLowLevel {
 
         for ((a,b) <- isoEdgesTopo)
           merge(List(a,b))
-        if (isoEdges.nonEmpty)
+        if (isoEdgesTopo.nonEmpty)
           continueAnalyze()
       }
 
