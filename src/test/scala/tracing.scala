@@ -832,7 +832,7 @@ trait Analyze extends RunLowLevel {
 
         val isoEdgesTopo = isoEdges.sortBy { case (a,b) => -a }
 
-        for ((a,b) <- isoEdges)
+        for ((a,b) <- isoEdgesTopo)
           merge(List(a,b))
         if (isoEdges.nonEmpty)
           continueAnalyze()
