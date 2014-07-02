@@ -710,9 +710,6 @@ trait Analyze extends RunLowLevel {
         merge(List(a,b))
       if (isoEdges.nonEmpty)
         continueAnalyze()
-
-      // print final graph
-      gg.printGraph("%03d".format(step))(counts,maxloopcount(trace),freq,edgefreq,edgehopfreq)(Nil)
     }
 
     try {
