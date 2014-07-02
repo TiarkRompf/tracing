@@ -617,9 +617,12 @@ trait Analyze extends RunLowLevel {
   def analyzeTrace(s: String) {
     val traceB = this.trace
 
-    implicit class MySeqOps[T](xs: Seq[T]) {
+    implicit class MySeqOps[T](xs: IndexedSeq[T]) {
       def collectBy[K,V](f1: T => K, f2: Seq[T] => V): Map[K,V] =
         xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
+
+      def collectByEdge[K,V](f1: ((T,T)) => K, f2: Seq[Int] => V): Map[K,V] =
+        (0 until xs.length-1).groupBy{i => f1(xs(i), xs(i+1))}.map{case (k, i) => (k, f2(i))}
     }
 
     val indexToBlock = traceB.distinct.toArray
@@ -665,19 +668,16 @@ trait Analyze extends RunLowLevel {
     def analyze(step: Int): Unit = {
       println(s"/* analysis pass $step */")
 
-      val freq = trace.collectBy(x=>x, _.length)
+      val freq = trace.collectBy(x => x, _.length)
 
-      val edges = trace zip trace.drop(1)
-
-      val edgefreq = edges collectBy(x=>x, _.length)
+      val edgefreq = trace.collectByEdge(x => x, _.length)
 
       val itrace = trace.filter(interesting)
-      val iedges = itrace zip itrace.drop(1)
 
-      val edgehopfreq = iedges collectBy(x=>x, _.length);
+      val edgehopfreq = itrace.collectByEdge(x => x, _.length);
 
-      val pred = edges collectBy(_._2, _.map(_._1).distinct);
-      val succ = edges collectBy(_._1, _.map(_._2).distinct);
+      val pred = trace.collectByEdge(_._2, _.map(i => trace(i)).distinct);
+      val succ = trace.collectByEdge(_._1, _.map(i => trace(i+1)).distinct);
 
       val continueAnalyze: () => Nothing = { () => return analyze(step + 1) }
 
