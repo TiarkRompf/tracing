@@ -639,7 +639,7 @@ trait Analyze extends RunLowLevel {
         xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
     }
 
-    val indexToBlock = t.distinct.toArray
+    val indexToBlock = traceB.distinct.toArray
     val blockToIndex = indexToBlock.zipWithIndex.toMap
     var trace = traceB map blockToIndex
     var interesting = if (tracePrefix != "") {
