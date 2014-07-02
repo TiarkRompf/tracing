@@ -637,6 +637,23 @@ trait Analyze extends RunLowLevel {
   }
 
 
+  def replaceAll(trace: Vector[Int], a: List[Int], b: List[Int]) = {
+    val r = new mutable.ArrayBuffer[Int]()
+    var ta = a
+    for (t <- trace) {
+      if (t == ta.head) {
+        ta = ta.tail
+        if (ta.isEmpty) {
+          r ++= b
+          ta = a
+        }
+      } else {
+        r += t
+      }
+    }
+    r.toVector
+  }
+
   def indexToBlockFun[A:Manifest](t: Vector[A]) = t.distinct.toArray
 
   // first version: inline deterministic jumps
@@ -686,9 +703,7 @@ trait Analyze extends RunLowLevel {
     def merge(xs: List[Int]) = {
       val List(a,b) = xs
       mergeHist(a) = mergeHist(a) ++ mergeHist(b)
-      val str0 = trace.mkString(";",";;",";")
-      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;")
-      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      trace = replaceAll(trace, List(a, b), List(a))
       // if (verbose) println(trace)
     }
     def dup(xs: List[Int]) = {
@@ -696,9 +711,7 @@ trait Analyze extends RunLowLevel {
       val c = count
       count += 1
       mergeHist(c) = mergeHist(b)
-      val str0 = trace.mkString(";",";;",";")
-      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;;$c;")
-      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      trace = replaceAll(trace, List(a, b), List(a, c))
       //println(trace)
     }
 
@@ -920,9 +933,7 @@ trait Analyze extends RunLowLevel {
     def merge(xs: List[Int]) = {
       val List(a,b) = xs
       mergeHist(a) = mergeHist(a) ++ mergeHist(b)
-      val str0 = trace.mkString(";",";;",";")
-      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;")
-      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      trace = replaceAll(trace, List(a, b), List(a))
       // if (verbose) println(trace)
     }
     def dup(xs: List[Int]) = {
@@ -930,9 +941,7 @@ trait Analyze extends RunLowLevel {
       val c = count
       count += 1
       mergeHist(c) = mergeHist(b)
-      val str0 = trace.mkString(";",";;",";")
-      val str1 = str0.replaceAll(s";$a;;$b;",s";$a;;$c;")
-      trace = str1.split(";").filterNot(_.isEmpty).map(_.toInt).toVector
+      trace = replaceAll(trace, List(a, b), List(a, c))
       //println(trace)
     }
 
