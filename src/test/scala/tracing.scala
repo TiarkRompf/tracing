@@ -554,14 +554,14 @@ trait Analyze extends RunLowLevel {
     val combinedPdf = new File(s"graphs-all-$s.pdf")
     if (combinedPdf.exists) combinedPdf.delete
 
-    def printGraph(s2:String)(counts: Int=>Int,maxloopcount:Int=>Int, freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
+    def printGraph(s2:String)(counts: Int=>Int,maxloopcount:Int=>Int, freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Map[Int,Int]): Unit = {
       val out = new PrintStream(new File(dir,s"g$s2.dot"))
       out.println("digraph G {")
 
       val fmax = freq.values.max
       val pmax = 15
       def scale(f: Double) = if (fmax <= pmax) f else f/fmax * pmax
-      val nodes = (edges.map(_._1)) //++ edges.map(_._2)).distinct
+      val nodes = edges.keySet
       for ((a,f) <- freq) {
         val fw = scale(f)
         val size = counts(a)
@@ -571,7 +571,7 @@ trait Analyze extends RunLowLevel {
       for (((a,b),f) <- edgefreq) {
         val fw = scale(f)
         val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
-        val color = if (edges contains (a,b)) "red" else "black"
+        val color = if (edges.get(a) == Some(b)) "red" else "black"
         out.println(s"""L$a -> L$b [label=\" $f $extra\" weight="$f" color="$color" penwidth="${fw}"]""")
       }
       /* draw edge hop frequences:  a -> ? -> b */
@@ -597,23 +597,6 @@ trait Analyze extends RunLowLevel {
 
   def report(s: String) {
     analyzeTrace(s)
-  }
-
-  def replaceAll(trace: Vector[Int], a: List[Int], b: List[Int]) = {
-    val r = new mutable.ArrayBuffer[Int]()
-    var ta = a
-    for (t <- trace) {
-      if (t == ta.head) {
-        ta = ta.tail
-        if (ta.isEmpty) {
-          r ++= b
-          ta = a
-        }
-      } else {
-        r += t
-      }
-    }
-    r.toVector
   }
 
   // find max iteration count
@@ -659,10 +642,20 @@ trait Analyze extends RunLowLevel {
     for (i <- 0 until counts.length)
       counts(i) = 0
 
-    def merge(xs: List[Int]) = {
-      val List(a,b) = xs
-      counts(a) = counts(a) + counts(b)
-      trace = replaceAll(trace, List(a, b), List(a))
+    def mergeEdges(isoEdges: Map[Int,Int]) = {
+      for ((a,b) <- isoEdges) {
+        counts(a) = counts(a) + counts(b)
+      }
+
+      val work = trace.toArray
+      var i = work.length - 2
+      while (i >= 0) {
+        if (isoEdges.get(work(i)) == Some(work(i+1))) {
+          work(i+1) = -1
+        }
+        i -= 1
+      }
+      trace = work.filter(_ >= 0).toVector
     }
 
     // export graph viz
@@ -694,8 +687,7 @@ trait Analyze extends RunLowLevel {
 
       def isloop(h: Int) = (succ0(h) contains h)
 
-      val hotedges = edgefreq.toSeq.sortBy(-_._2)
-      val isoEdges = hotedges collect { 
+      val isoEdges = edgefreq collect {
         case ((a,b),f) if succ(a).size == 1 && !interesting(b) => (a,b) 
         case ((a,b),f) if succ(a).size == 1 && interesting(b) && !isloop(b) => 
           interesting += a ;(a,b) // keep track of what's interesting
@@ -703,16 +695,8 @@ trait Analyze extends RunLowLevel {
 
       gg.printGraph("%03d".format(step))(counts,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
 
-      val m = isoEdges.toMap
-      def chain(a: Int): Int = {
-        m.get(a) match {
-          case Some(b) => 1+chain(b)
-          case None => 0
-        }
-      }
-      val isoEdgesTopo = isoEdges.sortBy { case (a,b) => chain(a) }
-      for ((a,b) <- isoEdgesTopo)
-        merge(List(a,b))
+      mergeEdges(isoEdges)
+
       if (isoEdges.nonEmpty)
         continueAnalyze()
     }
