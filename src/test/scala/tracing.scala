@@ -631,8 +631,6 @@ trait Analyze extends RunLowLevel {
     c max k
   }
 
-  def indexToBlockFun[A:Manifest](t: Vector[A]) = t.distinct.toArray
-
   def analyzeTrace(s: String) {
     val traceB = this.trace
 
@@ -641,7 +639,7 @@ trait Analyze extends RunLowLevel {
         xs.groupBy(f1).map(kv => (kv._1,f2(kv._2)))
     }
 
-    val indexToBlock = indexToBlockFun(traceB)
+    val indexToBlock = t.distinct.toArray
     val blockToIndex = indexToBlock.zipWithIndex.toMap
     var trace = traceB map blockToIndex
     var interesting = if (tracePrefix != "") {
