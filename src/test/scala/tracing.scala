@@ -568,7 +568,7 @@ trait RunLowLevel extends LangLowLevel {
 trait Analyze extends RunLowLevel {
   val verbose = false
 
-  val tracePrefix: String = ""
+  def tracePrefix: String = ""
 
   class GraphPrinter(s1: String) {
     // export graph viz
@@ -1402,6 +1402,8 @@ object DiHighTest extends Tag("tracing.di.high")
 object VmHighTest extends Tag("tracing.vm.high")
 object DiHigh2Test extends Tag("tracing.di.high2")
 object VmHigh2Test extends Tag("tracing.vm.high2")
+object DiHigh3Test extends Tag("tracing.di.high3")
+object VmHigh3Test extends Tag("tracing.vm.high3")
 
 trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
   def analyze: Boolean
@@ -1450,7 +1452,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val p = program(d)
     val fn = p.f
     val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze {
-      override val tracePrefix = "--(--"
+      override def tracePrefix = "--(--"
     }
     import i._
     val exp = list(sym(fn), data(p.a))
@@ -1484,7 +1486,7 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     val fn = p.f
 
     val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze{
-      override val tracePrefix = "--(-- --"
+      override def tracePrefix = "--(-- --"
     }
     import i._
     val exp = list(sym(en), list(sym("cons"), list(sym("quote"), list(sym(fn), data(p.a))), list(sym("quote"), global_env(d.order, d.funs, d.deps))))
@@ -1492,6 +1494,42 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     runProg(exp, env)
     assert(out === ev(data(p.b)))
     if (analyze) report(id+"-high2")
+  }
+
+  test(id+": triple-interpretation, direct", DiHigh3Test) {
+    val di = new Code2DataProgEval {}
+    val en = di.eval
+
+    val d = new Code2Data {}
+    val p = program(d)
+    val fn = p.f
+
+    val i = new ProgEval with LangDirect
+    import i._
+    val exp0 = list(en, list("cons", list("quote", list(fn, data(p.a))), list("quote", global_env(d.order, d.funs, d.deps))))
+    val env = global_env(di.order, di.funs, di.deps)
+    val exp = list(en, list("cons", list("quote", exp0), list("quote", env)))
+    assert(eval(exp, env) === data(p.b))
+  }
+
+  test(id+": triple-interpretation, low-level", VmHigh3Test) {
+    val di = new Code2DataProgEval {}
+    val en = di.eval
+
+    val d = new Code2Data {}
+    val p = program(d)
+    val fn = p.f
+
+    val i = new ProgEval with LangLowLevel with RunHighLevel with Analyze{
+      override def tracePrefix = "--(-- -- --"
+    }
+    import i._
+    val exp0 = list(sym(en), list(sym("cons"), list(sym("quote"), list(sym(fn), data(p.a))), list(sym("quote"), global_env(d.order, d.funs, d.deps))))
+    val env = global_env(di.order, di.funs, di.deps)
+    val exp = list(sym(en), list(sym("cons"), list(sym("quote"), exp0), list(sym("quote"), env)))
+    runProg(exp, env)
+    assert(out === ev(data(p.b)))
+    if (analyze) report(id+"-high3")
   }
 }
 
