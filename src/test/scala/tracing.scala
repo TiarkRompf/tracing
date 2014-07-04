@@ -730,7 +730,7 @@ trait Analyze extends RunLowLevel {
       // if (verbose) println(trace)
     }
     def mergeEdges(isoEdges: Map[Int,Int]) = {
-      val nodesTopo = isoEdges.keys.toSeq.sortBy(- _)
+      // TODO: update mergeHist...
       val work = trace.toArray
       var i = work.length - 2
       while (i >= 0) {
