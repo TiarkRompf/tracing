@@ -997,6 +997,24 @@ trait Analyze extends RunLowLevel {
     assert(splitWhere(List(1,2,3,4,5,6,7,8,9))(_ % 4 == 0) == 
       List(List(1, 2, 3, 4), List(5, 6, 7, 8), List(9)))
 
+    // build a trace of traces ...
+    def collapseLevel(traces: Seq[Seq[Int]]): Unit = {
+      println("block <-> index:")
+      val indexToBlock2 = traces.distinct.toArray
+      val blockToIndex2 = indexToBlock2.zipWithIndex.toMap
+      //println(blockToIndex2)
+      val indexToBlockHist1 = indexToBlockHist
+      val nodeSize1 = nodeSize
+      indexToBlockHist = { case x: Int => indexToBlock2(x).flatMap(indexToBlockHist1) }
+      nodeSize = { case x: Int => indexToBlock2(x).map(nodeSize1).sum }
+
+      trace = (traces map blockToIndex2).toVector
+      
+      println
+      println("trace")
+      println(trace)
+    }
+
     // perform one step of analysis/transformation
     def analyze(step: Int): Vector[Int] = {
       if (step > 70) {
@@ -1071,7 +1089,36 @@ trait Analyze extends RunLowLevel {
       val hotspotsNoLoop = hotspots.map(_._1).filter(nodeOk)
       val pivot = hotspotsNoLoop.head
 
-      if (freq(pivot) == 1) { // done, only loops remain
+      if (freq(pivot) == 1) { // only loops remain -- try some unrolling, otherwise we're done
+
+        val loops = hotspots.map(_._1).filter(isLoop)
+        val maxSize = loops.map(nodeSize).max
+        val unrollSizeThresh = 0.01 * maxSize
+
+        def loopOk(a: Int) = (nodeSize(a) < unrollSizeThresh)
+        val hotloops = loops.filter(loopOk)
+
+        if (hotloops.nonEmpty) {
+          val h = hotloops.head
+          println(s" -----> unroll $h,$h")
+
+          def iter(xs: List[Int]): List[List[Int]] = xs match {
+            case `h`::`h`::xs => List(h,h)::iter(xs)
+            case x::xs => List(x)::iter(xs)
+            case Nil => Nil
+          }
+          val traces = iter(trace.toList)
+
+          gg.printGraph("%03d".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,Map.empty)(List((h,h)))
+
+          collapseLevel(traces)
+          return analyze(step+1)
+        }
+
+        // nothing we're comfortable to unroll, say we're done
+        println("can't unroll:")
+
+
         gg.printGraph("%03d_A".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,Map.empty)(Nil)
 
         //if (verbose) {
@@ -1091,7 +1138,7 @@ trait Analyze extends RunLowLevel {
         return trace
       } 
 
-      if (step > 0)
+      if (step > 0) // high3 step 0 is too big -- dot takes forever
         gg.printGraph("%03d_A".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,Map.empty)(List((pivot,pivot)))
 
       val ignoreHeadAndTail = true
@@ -1101,30 +1148,14 @@ trait Analyze extends RunLowLevel {
           traces0.head.map(List(_)) ++ traces0.tail.init ++ traces0.last.map(List(_))
         else
           traces0
-      val hottraces = traces.groupBy(x=>x).map{case(k,v)=>(k,v.length)}.toSeq.sortBy(-_._2)
 
+      val hottraces = traces.groupBy(x=>x).map{case(k,v)=>(k,v.length)}.toSeq.sortBy(-_._2)
       println
       println("5 hot traces")
       //hottraces.take(5).foreach{case(t,c)=>println("---"+c);t.foreach(println)}
       hottraces.take(10).foreach(p=>println(p._2+"*"+p._1.mkString(" ")))
 
-      // build a trace of traces ...
-
-      println("block <-> index:")
-      val indexToBlock2 = traces.distinct.toArray
-      val blockToIndex2 = indexToBlock2.zipWithIndex.toMap
-      //println(blockToIndex2)
-      val indexToBlockHist1 = indexToBlockHist
-      val nodeSize1 = nodeSize
-      indexToBlockHist = { case x: Int => indexToBlock2(x).flatMap(indexToBlockHist1) }
-      nodeSize = { case x: Int => indexToBlock2(x).map(nodeSize1).sum }
-
-      trace = (traces map blockToIndex2).toVector
-
-      println
-      println("trace")
-      println(trace)
-
+      collapseLevel(traces)
       analyze(step+1)
 
     }
@@ -1599,8 +1630,8 @@ trait ProgramFactorial extends Program[Int,Int] {
     }
     new P[Int,Int] {
       def f = fac
-      def a = 100//10//4
-      def b = 0//3628800//24 overflow for n=100
+      def a = 10//10//4
+      def b = 3628800//24 overflow for n=100
     }
   }
 }
