@@ -192,8 +192,8 @@ trait Eval extends Syntax with Print with Runtime {
   }
   def exec(stm: Stm): Unit = { /*println(stm);*/ stm } match {
     case Print(as @ _*) => 
-      val str = as.map(a=>eval[Any](a)).map(objToString).mkString
-      trace = trace :+ str
+      //val str = as.map(a=>eval[Any](a)).map(objToString).mkString
+      //trace = trace :+ str
     case Output(a) => output(eval[Any](a))
     case Put(a,b,c) => (eval[Obj](a))(eval[Any](b)) = eval[Any](c)
     case New(a,b) => (eval[Obj](a))(eval[Any](b)) = new mutable.HashMap
@@ -578,7 +578,7 @@ trait Analyze extends RunLowLevel {
     val combinedPdf = new File(s"graphs-all-$s1.pdf")
     if (combinedPdf.exists) combinedPdf.delete
 
-    def printGraph(s2:String)(mergeHist: Int=>Seq[Int],maxloopcount:Int=>Int, freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
+    def printGraph(s2:String)(nodeSize: Int=>Int,maxloopcount:Int=>Int, freq: Map[Int,Int], edgefreq: Map[(Int,Int),Int], edgehopfreq: Map[(Int,Int),Int])(edges: Seq[(Int,Int)]): Unit = {
       val out = new PrintStream(new File(dir,s"g$s2.dot"))
       out.println("digraph G {")
       //out.println("rankdir=LR")
@@ -595,7 +595,7 @@ trait Analyze extends RunLowLevel {
       val nodes = (edges.map(_._1)) //++ edges.map(_._2)).distinct
       for ((a,f) <- freq) {
         val fw = scale(f)
-        val size = mergeHist(a).length
+        val size = nodeSize(a)
         val color = if (nodes contains a) "red" else "black"
         out.println(s"""L$a [label=\"B$a\\n s=$size f=$f\" weight="$f" color="$color" penwidth="${fw}" shape=box]""")
       }
@@ -631,9 +631,11 @@ trait Analyze extends RunLowLevel {
     // note: both steps can be run independently or together.
 
 
-    val tr1 = analyzeDeterministicJumps(s1+"A")
+    //val tr1 = analyzeDeterministicJumps(s1+"A")
     //this.trace = tr1.map(_.toString)
     //val tr2 = analyzeTraceHierarchies(s1+"B")
+
+    analyzeTraceHierarchies(s1+"B")
   }
 
   def time[A](msg: String)(a: => A) = {
@@ -697,7 +699,7 @@ trait Analyze extends RunLowLevel {
     var trace = traceB map blockToIndex
     var interesting = trace.toSet// empty
 
-    if (tracePrefix != "") {
+    if (tracePrefix != "" && false) {
       val inner = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex)
 
       println("INTERESTING1:")
@@ -810,6 +812,8 @@ trait Analyze extends RunLowLevel {
 
       val continueAnalyze: () => Nothing = { () => return analyze(step + 1) }
 
+      def nodeSize(a: Int) = mergeHist(a).length
+
       /* 
       Trying two variants: (1) considers one node at a time in order
       of execution frequency, whereas (2) considers all jumps at once.
@@ -849,7 +853,7 @@ trait Analyze extends RunLowLevel {
           } // specific transfer
         }
         time("printGraph") {
-          gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
+          gg.printGraph("%03d".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,edgehopfreq)(isoEdges)
         }
 
         time("merge") {
@@ -887,7 +891,7 @@ trait Analyze extends RunLowLevel {
           }
           if (hit.nonEmpty) {
             println(hit)
-            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(hit)
+            gg.printGraph("%03d".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,edgehopfreq)(hit)
             continueAnalyze()
           }
         }
@@ -899,7 +903,7 @@ trait Analyze extends RunLowLevel {
           if ((succ(h) contains h) && maxloopcount(trace)(h) <= 3) {
             println(s" -----> unroll $h,$h")
             merge(List(h,h))
-            gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(List((h,h)))
+            gg.printGraph("%03d".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,edgehopfreq)(List((h,h)))
             continueAnalyze()
           }
         }
@@ -910,7 +914,7 @@ trait Analyze extends RunLowLevel {
       variant2()
 
       // print final graph
-      gg.printGraph("%03d".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,edgehopfreq)(Nil)
+      gg.printGraph("%03d".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,edgehopfreq)(Nil)
     }
 
     try {
@@ -945,6 +949,9 @@ trait Analyze extends RunLowLevel {
     val indexToBlock = indexToBlockFun(traceB)
     val blockToIndex = indexToBlock.zipWithIndex.toMap
     if (verbose) println(blockToIndex)
+
+    var indexToBlockHist: Any => Seq[Any] = { case x: Int => List(indexToBlock(x)) }
+    var nodeSize: Int => Int = { case x: Int => 1 }
 
     var trace = traceB map blockToIndex
 
@@ -992,7 +999,7 @@ trait Analyze extends RunLowLevel {
 
     // perform one step of analysis/transformation
     def analyze(step: Int): Vector[Int] = {
-      if (step > 30) {
+      if (step > 70) {
         println("ABORT")
         return trace
       }
@@ -1058,18 +1065,34 @@ trait Analyze extends RunLowLevel {
       */
 
 
-      def isLoop(a: Int) = succ.getOrElse(a,Seq()) contains a
+      def isLoop(a: Int) = (succ.getOrElse(a,Seq()) contains a) //&& maxloopcount(trace)(a) > 3
       def nodeOk(a: Int) = /*interesting.contains(h) &&*/ !isLoop(a)
 
-      val hotspotsNoLoop = hotspots.map(_._1).filterNot(nodeOk)
-      val pivot = hotspotsNoLoop.takeWhile(a=>freq(a) == freq(hotspotsNoLoop.head)).last
+      val hotspotsNoLoop = hotspots.map(_._1).filter(nodeOk)
+      val pivot = hotspotsNoLoop.head
 
       if (freq(pivot) == 1) { // done, only loops remain
-        gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,Map.empty)(Nil)
-        return trace
-      }
+        gg.printGraph("%03d_A".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,Map.empty)(Nil)
 
-      gg.printGraph("%03d_A".format(step))(mergeHist,maxloopcount(trace),freq,edgefreq,Map.empty)(List((pivot,pivot)))
+        //if (verbose) {
+        if (!hotspots.isEmpty) {
+          val hottest = hotspots.take(10)
+          println("hot traces")
+          println(hottest)
+          for ((h,f) <- hottest if f > 1) {
+            println(f+"*"+h+"=")
+            indexToBlockHist(h).foreach(s => println("  "+s))
+          }
+          println()
+        } else {
+          println("NO hotspots")
+        }        
+
+        return trace
+      } 
+
+      if (step > 0)
+        gg.printGraph("%03d_A".format(step))(nodeSize,maxloopcount(trace),freq,edgefreq,Map.empty)(List((pivot,pivot)))
 
       val ignoreHeadAndTail = true
 
@@ -1090,7 +1113,11 @@ trait Analyze extends RunLowLevel {
       println("block <-> index:")
       val indexToBlock2 = traces.distinct.toArray
       val blockToIndex2 = indexToBlock2.zipWithIndex.toMap
-      println(blockToIndex2)
+      //println(blockToIndex2)
+      val indexToBlockHist1 = indexToBlockHist
+      val nodeSize1 = nodeSize
+      indexToBlockHist = { case x: Int => indexToBlock2(x).flatMap(indexToBlockHist1) }
+      nodeSize = { case x: Int => indexToBlock2(x).map(nodeSize1).sum }
 
       trace = (traces map blockToIndex2).toVector
 
@@ -1104,6 +1131,9 @@ trait Analyze extends RunLowLevel {
 
     try {
       analyze(0)
+    } catch { case e =>
+      e.printStackTrace
+      throw e
     } finally {
       gg.finish()
     }
@@ -1145,8 +1175,9 @@ trait ProgEval extends LangX {
 
   def lookup: Fun2[Term,Term,Term] = fun2("lookup") { (x,env) =>
     //println("LOOKUP:"+x+":"+env)
+    begin(eprint(car(car(env))),
     ife(equs(x, car(car(env))), cdr(car(env)),
-        lookup(x,cdr(env)))
+        lookup(x,cdr(env))))
   }
 
   def my_arr_new: Term1 = {newMyArr[Term]; num(0)}
@@ -1453,6 +1484,8 @@ trait ProgramFunSuite[A,B] extends FunSuite with Program[A,B] {
     runLow(p.f, ev(p.a))
     assert(out === ev(p.b))
     if (analyze) report(id+"-low")
+    println(prog)
+    trace.foreach(println)
   }
 
   test(id+": execute in high-level interpreter, which is executed directly", DiHighTest) {
@@ -1566,8 +1599,8 @@ trait ProgramFactorial extends Program[Int,Int] {
     }
     new P[Int,Int] {
       def f = fac
-      def a = 10//4
-      def b = 3628800//24
+      def a = 100//10//4
+      def b = 0//3628800//24 overflow for n=100
     }
   }
 }
