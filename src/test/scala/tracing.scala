@@ -35,7 +35,7 @@ trait Syntax {
   }
 
   abstract class Jump
-  case class IfElse(c: Exp, a: Jump, b: Jump) extends Jump
+  //case class IfElse(c: Exp, a: Jump, b: Jump) extends Jump
   case class Goto(name: Exp) extends Jump
   case object Done extends Jump
 
@@ -84,7 +84,7 @@ trait Print extends Syntax {
     case Print(a) => s"print(${pretty(a)})"
     case Output(a) => s"output(${pretty(a)})"
 
-    case IfElse(c,a,b) => s"if (${pretty(c)}) ${pretty(a)} else ${pretty(b)}"
+    //case IfElse(c,a,b) => s"if (${pretty(c)}) ${pretty(a)} else ${pretty(b)}"
     case Goto(a) => s"goto ${pretty(a)}"
     case Done => "exit"
 
@@ -184,7 +184,7 @@ trait Eval extends Syntax with Print with Runtime {
     case Done => TrampoDone
     case Goto(l) =>
       TrampoLabel(eval[Label](l))
-    case IfElse(c,a,b) => if (eval[Boolean](c)) resolve(a) else resolve(b)
+    //case IfElse(c,a,b) => if (eval[Boolean](c)) resolve(a) else resolve(b)
     case Guard(l,x,b) =>
       val x1 = eval[Label](l)
       if (x1 == x) TrampoBlock(b)
@@ -490,7 +490,7 @@ trait LangLowLevel extends LangX with LowLevel {
     val ucont = uname+"j"
     val ures  = uname
 
-    prog(label) = Block(stms, IfElse(c,Goto(uthen),Goto(uelse)))
+    prog(label) = Block(stms, Goto(ITE(c,uthen,uelse)))
 
     val sd = Get(Mem,"sd")
     val sp = Get(Mem,"sp")
