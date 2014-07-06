@@ -606,11 +606,13 @@ trait Analyze extends RunLowLevel {
         out.println(s"""L$a -> L$b [label=\" $f $extra\" weight="$f" color="$color" penwidth="${fw}"]""")
       }
       /* draw edge hop frequences:  a -> ? -> b */
-      for (((a,b),f) <- edgehopfreq) {
-        val fw = 0.5
-        val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
-        val color = "green"
-        out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="0" color="$color" penwidth="${fw}"]""")
+      if (lookForInteresting) {
+        for (((a,b),f) <- edgehopfreq) {
+          val fw = 0.5
+          val extra = if (a != b) "" else s"(max ${maxloopcount(a)})"
+          val color = "green"
+          out.println(s"""L$a -> L$b [label=\"$f $extra\" weight="0" color="$color" penwidth="${fw}"]""")
+        }
       }
       out.println("}")
       out.close()
@@ -681,6 +683,8 @@ trait Analyze extends RunLowLevel {
 
   def indexToBlockFun[A:Manifest](t: Vector[A]) = t.distinct.toArray
 
+  val lookForInteresting = false
+
   // first version: inline deterministic jumps
   def analyzeDeterministicJumps(s1:String): Vector[Int] = {
     val traceB = this.trace
@@ -699,7 +703,7 @@ trait Analyze extends RunLowLevel {
     var trace = traceB map blockToIndex
     var interesting = trace.toSet// empty
 
-    if (tracePrefix != "" && false) {
+    if (tracePrefix != "" && lookForInteresting) {
       val inner = traceB.filter(_.startsWith(tracePrefix)).map(blockToIndex)
 
       println("INTERESTING1:")
@@ -732,11 +736,17 @@ trait Analyze extends RunLowLevel {
       // if (verbose) println(trace)
     }
     def mergeEdges(isoEdges: Map[Int,Int]) = {
-      // TODO: update mergeHist...
+      // update mergeHist (size info)
+      val seen = mutable.HashSet[Int]()
+      // update actual trace
       val work = trace.toArray
       var i = work.length - 2
       while (i >= 0) {
         if (isoEdges.get(work(i)) == Some(work(i+1))) {
+          if (!seen(work(i))) {
+            seen += work(i)
+            mergeHist(work(i)) = mergeHist(work(i)) ++ mergeHist(work(i+1))
+          }
           work(i+1) = -1
         }
         i -= 1
@@ -900,6 +910,9 @@ trait Analyze extends RunLowLevel {
       // unroll small loops -- may or may not want to do this
       def unrollSmallLoops(): Unit = {
         for ((h,f) <- hotspots if succ contains h) {
+
+          // TODO: come up with better criterion?
+          //if ((succ(h) contains h) && maxloopcount(trace)(h) <= 0.2 * freq(h)) {
           if ((succ(h) contains h) && maxloopcount(trace)(h) <= 3) {
             println(s" -----> unroll $h,$h")
             merge(List(h,h))
